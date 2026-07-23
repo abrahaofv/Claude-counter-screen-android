@@ -16,6 +16,7 @@ local.properties
 
 # App module build
 /app/build/
+*.apk
 
 # Do not ignore gradle wrapper or gradlew
 !gradle/wrapper/gradle-wrapper.jar

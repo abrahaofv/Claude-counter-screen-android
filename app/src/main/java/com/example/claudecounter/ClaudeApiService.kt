@@ -1,19 +1,15 @@
 package com.example.claudecounter
 
-import android.util.Log
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
- * Fetches Claude usage data from the API.
- * Requires the session cookie obtained via the WebView login.
+ * Parses the JSON returned by claude.ai's /usage endpoint.
+ *
+ * The endpoint is fetched via [WebViewUsageFetcher], not a raw HTTP client: a plain
+ * HttpURLConnection request gets a 403 from Anthropic's bot detection, so the network
+ * call now happens inside a real claude.ai page context. This object is parsing-only.
  */
 object ClaudeApiService {
-
-    private const val TAG = "ClaudeApiService"
-    private const val BASE_URL = "https://claude.ai/api/organizations/%s/usage"
 
     // ── Data models ──────────────────────────────────────────────────────────
 
@@ -34,54 +30,20 @@ object ClaudeApiService {
         val isApiBlocked: Boolean = false
     )
 
-    // ── Fetch ────────────────────────────────────────────────────────────────
-
     /**
-     * Synchronous fetch – call from a background thread.
-     * Returns a [UsageResult] with parsed usage data or an error.
+     * Turns a (jsonText, errorMessage) pair from [WebViewUsageFetcher.fetchUsage] into a
+     * [UsageResult]. Exactly one of the two arguments is expected to be non-null.
      */
-    fun fetchUsage(orgId: String, sessionCookie: String): UsageResult {
-        var connection: HttpURLConnection? = null
+    fun parseUsageResponse(jsonText: String?, errorMessage: String?): UsageResult {
+        if (errorMessage != null) {
+            val isBlocked = errorMessage.contains("403")
+            return UsageResult(success = false, errorMessage = errorMessage, isApiBlocked = isBlocked)
+        }
         return try {
-            val url = URL(BASE_URL.format(orgId))
-            connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 15_000
-                readTimeout = 15_000
-                setRequestProperty("Cookie", sessionCookie)
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "ClaudeCounter/1.0 Android")
-                setRequestProperty("Referer", "https://claude.ai/")
-                setRequestProperty("sec-fetch-site", "same-origin")
-            }
-
-            val responseCode = connection.responseCode
-            if (responseCode == 200) {
-                val body = connection.inputStream
-                    .bufferedReader()
-                    .use(BufferedReader::readText)
-                val json = JSONObject(body)
-                val data = parseUsageData(json)
-                UsageResult(success = true, data = data)
-            } else {
-                val errBody = connection.errorStream
-                    ?.bufferedReader()?.use(BufferedReader::readText) ?: ""
-                Log.w(TAG, "HTTP $responseCode: $errBody")
-                if (responseCode == 403) {
-                    UsageResult(
-                        success = false,
-                        errorMessage = "API access restricted by Anthropic",
-                        isApiBlocked = true
-                    )
-                } else {
-                    UsageResult(success = false, errorMessage = "HTTP $responseCode")
-                }
-            }
+            val json = JSONObject(jsonText ?: "")
+            UsageResult(success = true, data = parseUsageData(json))
         } catch (e: Exception) {
-            Log.e(TAG, "fetchUsage error", e)
             UsageResult(success = false, errorMessage = e.message)
-        } finally {
-            connection?.disconnect()
         }
     }
 

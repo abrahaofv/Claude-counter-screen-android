@@ -12,30 +12,55 @@ import android.os.Looper
 import android.util.Log
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
+import com.example.claudecounter.data.PollingSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 /**
- * Foreground service that polls the claude.ai /usage endpoint every 2 minutes.
+ * Foreground service that polls the claude.ai /usage endpoint on an adaptive
+ * cadence: the slow idle interval while nothing is happening, and the short
+ * active interval for the few minutes after token usage is detected (see
+ * [PollingSettings] and [SessionManager.evaluatePollMode]).
  * Sends a notification when a session or weekly window resets.
  */
 class UsagePollingService : Service() {
 
     private val tag = "UsagePollingService"
     private val handler = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private lateinit var sessionManager: SessionManager
+    private lateinit var pollingSettings: PollingSettings
 
     private val pollRunnable = object : Runnable {
         override fun run() {
             pollUsage()
-            handler.postDelayed(this, POLL_INTERVAL_MS)
+            // pollUsage() is async; the mode it may promote is picked up either by
+            // rescheduleNow() from its callback or by the next tick.
+            sessionManager.evaluatePollMode()
+            scheduleNext()
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         sessionManager = SessionManager.getInstance(applicationContext)
+        pollingSettings = PollingSettings.getInstance(applicationContext)
         NotificationHelper.createChannels(this)
         startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification(null))
+
+        // A settings change must take effect immediately, otherwise a long
+        // postDelayed already in flight would keep the old cadence for minutes.
+        scope.launch {
+            pollingSettings.config.drop(1).collect {
+                Log.d(tag, "Polling settings changed, rescheduling")
+                rescheduleNow()
+            }
+        }
         Log.d(tag, "Service started")
     }
 
@@ -47,14 +72,35 @@ class UsagePollingService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(pollRunnable)
+        scope.cancel()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** The cadence in force right now, honouring the adaptive on/off switch. */
+    private fun currentIntervalMs(): Long {
+        val config = pollingSettings.current
+        val active = config.adaptiveEnabled &&
+            sessionManager.usageState.value.pollMode == PollMode.ACTIVE
+        return if (active) config.activeIntervalMs else config.idleIntervalMs
+    }
+
+    private fun scheduleNext() {
+        val interval = currentIntervalMs()
+        handler.removeCallbacks(pollRunnable)
+        handler.postDelayed(pollRunnable, interval)
+    }
+
+    /**
+     * Re-arms the timer against the interval in force *now*, cancelling whatever
+     * delay is pending. Used when the mode or the settings change mid-cycle so
+     * the new cadence doesn't wait out the old one.
+     */
+    private fun rescheduleNow() = scheduleNext()
+
     private fun pollUsage() {
         val orgId = sessionManager.orgId ?: return
-        val cookie = sessionManager.sessionCookie ?: return
 
         // Don't poll if we already know the API is blocked
         if (sessionManager.usageState.value.isApiBlocked) {
@@ -62,14 +108,24 @@ class UsagePollingService : Service() {
             return
         }
 
-        Thread {
-            val result = ClaudeApiService.fetchUsage(orgId, cookie)
+        WebViewUsageFetcher.getInstance().fetchUsage(this, orgId) { json, error ->
+            val result = ClaudeApiService.parseUsageResponse(json, error)
             if (result.success && result.data != null) {
                 val prevSessionReset = sessionManager.lastSessionResetsAt
                 val prevWeeklyReset = sessionManager.lastWeeklyResetsAt
+                val prevMode = sessionManager.usageState.value.pollMode
 
                 sessionManager.clearError()
                 sessionManager.updateUsage(result.data)
+
+                // updateUsage flips to ACTIVE the moment it sees usage rise —
+                // switch to the fast cadence now instead of after the slow tick.
+                if (prevMode != PollMode.ACTIVE &&
+                    sessionManager.usageState.value.pollMode == PollMode.ACTIVE
+                ) {
+                    Log.d(tag, "Usage detected — switching to ACTIVE polling")
+                    rescheduleNow()
+                }
 
                 val newSessionReset = sessionManager.usageState.value.sessionResetsAt
                 val newWeeklyReset = sessionManager.usageState.value.weeklyResetsAt
@@ -84,8 +140,10 @@ class UsagePollingService : Service() {
                 sessionManager.setApiBlocked(true, result.errorMessage)
                 handler.removeCallbacks(pollRunnable)
                 updateForegroundNotificationBlocked()
+            } else {
+                Log.w(tag, "Usage fetch failed: ${result.errorMessage}")
             }
-        }.start()
+        }
     }
 
     /**
@@ -190,7 +248,6 @@ class UsagePollingService : Service() {
     }
 
     companion object {
-        private const val POLL_INTERVAL_MS = 2L * 60L * 1000L  // 2 minutes
         private const val FOREGROUND_NOTIFICATION_ID = 1001
     }
 }

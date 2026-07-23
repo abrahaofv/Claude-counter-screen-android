@@ -4,11 +4,9 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 
 class UsageViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -19,9 +17,9 @@ class UsageViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refresh() {
         val orgId = sessionManager.orgId ?: return
-        val cookie = sessionManager.sessionCookie ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = ClaudeApiService.fetchUsage(orgId, cookie)
+        val context = getApplication<Application>()
+        WebViewUsageFetcher.getInstance().fetchUsage(context, orgId) { json, error ->
+            val result = ClaudeApiService.parseUsageResponse(json, error)
             if (result.success && result.data != null) {
                 sessionManager.clearError()
                 sessionManager.updateUsage(result.data)

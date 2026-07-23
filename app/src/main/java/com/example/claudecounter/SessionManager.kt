@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.claudecounter.data.SurvivalStatsRepository
 import com.example.claudecounter.data.UsageHistoryRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -205,6 +206,7 @@ class SessionManager private constructor(context: Context) {
         _momentEvents.tryEmit(MomentEvent(window, top, newPct.toFloat(), resetsAtMs))
         if (top == 100) {
             NotificationHelper.notifyClawdDown(appContext, window)
+            SurvivalStatsRepository.getInstance(appContext).recordDeath(System.currentTimeMillis())
         }
     }
 

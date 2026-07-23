@@ -1,7 +1,9 @@
 # Fase 7 — Lápide/Fantasma & Contador de Sobrevivência
 
 Criado: 2026-07-23
-Atualizado: 2026-07-23
+Atualizado: 2026-07-23 (implementado)
+
+**Decisões tomadas** (defaults recomendados no documento, sem objeção do usuário): lápide/fantasma **substitui** o KO cinza-com-X (não é opcional); contador de sobrevivência **global** (uma única janela morrendo — 5h ou semana — zera o contador); recorde **permanente**.
 
 ## Context
 
@@ -13,6 +15,7 @@ Esta é a continuação do plano "Clawd Tamagochi" (Fases 1-6, já implementadas
 O usuário curtiu o preview e quer implementar, mas **não agora** — este documento existe para retomar o trabalho depois sem precisar re-explorar o código do zero.
 
 **Decisões ainda em aberto** (o preview lista as mesmas 3 perguntas — resolver antes ou no início da implementação):
+
 1. A lápide/fantasma **substitui** o KO cinza-com-X atual, ou fica opcional (ex.: um switch extra em Configurações)?
 2. O contador de sobrevivência é **um contador global** (reseta na morte de qualquer uma das duas janelas) ou **um contador por janela** (5h e semana cada um com o seu)?
 3. O recorde é **permanente** (guardado para sempre) ou só **"melhor da semana"** (reseta periodicamente)?
@@ -23,47 +26,41 @@ Recomendação default caso o usuário não tenha preferência quando isto for r
 
 ## Fase 7.1 — Cena de lápide/fantasma (`GraveScene`)
 
-- [ ] 7.1.1 Adicionar um novo composable `GraveScene(width: Dp, modifier: Modifier = Modifier)` — provavelmente em [Mascot.kt](../app/src/main/java/com/example/claudecounter/ui/brand/Mascot.kt) ou um arquivo novo `ui/brand/GraveScene.kt`, já que estruturalmente é diferente do `Mascot()` (dois elementos — lápide estática + fantasma animado — não um único `Path` com stages). Não é um `MascotStage` a mais: é a substituição visual específica de `MascotStage.KO`.
-- [ ] 7.1.2 Portar a geometria exata do preview (`clawd-fase7-preview.html`, função `graveSvg()`):
-  - Lápide: path com topo arredondado (dois arcos) + base reta, cor `StickColors.MascotKo` (`#6A6A74`) — mesma cor já usada no corpo do mascote morto, pra manter a associação visual.
-  - Texto gravado "RIP" centralizado, fonte mono, baixa opacidade preta (~0.34), simulando entalhe.
-  - Sombra/monte de terra: elipse escura semitransparente na base.
-  - Fantasma: silhueta clássica (topo arredondado + base ondulada de 5 pontas), `fill = StickColors.Accent` a ~60% de opacidade, dois olhos retangulares escuros. Flutua com bob vertical (~3.2s, ease-in-out) + pulso sutil de opacidade — em Compose, usar `rememberInfiniteTransition` como o `Mascot()` já faz (ver `bobPhase`/`shakePhase` em Mascot.kt para o padrão).
-- [ ] 7.1.3 Decidir a resolução da pergunta 1 (substituir vs. opcional) e implementar de acordo. Se "substituir": trocar direto onde `MascotStage.KO` é renderizado.
-- [ ] 7.1.4 **Atenção ao tamanho**: o mini-mascote em `TileAgora` (`UsageCardStick`, ~56dp — ver [TileAgora.kt:138](../app/src/main/java/com/example/claudecounter/ui/tiles/TileAgora.kt#L138)) provavelmente é pequeno demais para a cena de duas peças (lápide + fantasma) ficar legível. Avaliar no preview/emulador se compensa manter o mascote cinza-com-X simples só nesse tamanho mini, e usar `GraveScene` apenas na aba Clawd (`TileClawd.kt`, mascote ~96-160dp) e no `MomentOverlay` (176dp).
-- [ ] 7.1.5 Atualizar os call sites que hoje decidem `MascotStage.KO` para mascote: `TileClawd.kt` (`ClawdCard`), `MomentOverlay.kt` (mensagem/borda vermelha pulsante — conferir se a borda ainda faz sentido com a cena nova ou se fica redundante), e opcionalmente `TileAgora.kt`/`StickHeader.kt` conforme decisão da 7.1.4.
+- [x] 7.1.1 Novo composable `GraveScene(width: Dp, modifier: Modifier = Modifier)` em `ui/brand/GraveScene.kt` (arquivo próprio, como o plano antecipava — dois elementos desenhados num só `Canvas`, não um `MascotStage` a mais).
+- [x] 7.1.2 Geometria portada 1:1 do `graveSvg()` do preview: lápide com dois `Path.arcTo` (r=6, centros em (16,17) e (24,17)) + base reta, `StickColors.MascotKo`; texto "RIP" via `nativeCanvas`/`android.graphics.Paint` (monospace, alpha 0.34); elipse de sombra `Color.Black alpha 0.32`; fantasma com `quadraticTo` (topo arredondado + base de 5 pontas), `StickColors.Accent` a 60%, dois olhos `drawRoundRect` pretos, bob (`sin(phase/2)`, 3.2s) + pulso de opacidade via `rememberInfiniteTransition`.
+- [x] 7.1.3 Pergunta 1 resolvida como **substituir** (default recomendado) — troca direto onde `MascotStage.KO` é renderizado, sem switch novo.
+- [x] 7.1.4 Decidido manter o mascote cinza-com-X simples no mini-card (`TileAgora`/`StickHeader`, 56dp) — `GraveScene` só entra na aba Clawd (96dp) e no `MomentOverlay` (176dp), onde há espaço pra ler as duas peças.
+- [x] 7.1.5 `TileClawd.kt` (`ClawdCard`) e `MomentOverlay.kt` atualizados para renderizar `GraveScene` em vez de `Mascot` quando `stage == MascotStage.KO`. Borda vermelha pulsante do overlay mantida (ainda é um sinal de "crítico" independente da cena). `TileAgora.kt`/`StickHeader.kt` não tocados, por causa da 7.1.4.
 
 ## Fase 7.2 — Persistência de sobrevivência (`SurvivalStatsRepository`)
 
-- [ ] 7.2.1 Criar `app/src/main/java/com/example/claudecounter/data/SurvivalStatsRepository.kt`, seguindo o padrão de singleton + `SharedPreferences` já usado em [PollingSettings.kt](../app/src/main/java/com/example/claudecounter/data/PollingSettings.kt) e [DisplaySettings.kt](../app/src/main/java/com/example/claudecounter/data/DisplaySettings.kt) (prefs simples, sem criptografia — não guarda credencial).
-- [ ] 7.2.2 Resolver a pergunta 2 (global vs. por janela) e desenhar o estado de acordo:
-  - Se **global**: `aliveSinceMs: Long` (default = primeira instalação/primeiro uso) + `recordMs: Long`.
-  - Se **por janela**: duplicar os dois campos para `SESSION` e `WEEKLY` (`UsageWindow` já existe em [SessionManager.kt](../app/src/main/java/com/example/claudecounter/SessionManager.kt)).
-- [ ] 7.2.3 Resolver a pergunta 3 (recorde permanente vs. semanal). Se semanal, definir o dia/hora do corte (ex.: mesma âncora do reset semanal da Anthropic) e quando o valor é arquivado/exibido.
-- [ ] 7.2.4 Função `recordDeath(now: Long)`: compara `now - aliveSinceMs` contra `recordMs` (atualiza se for maior), depois reseta `aliveSinceMs = now`. Persistir os dois valores.
-- [ ] 7.2.5 Função de leitura pura para formatar duração (`Xd Yh` / `Xh Ymin` / `Xmin`) — o preview já tem a lógica de referência em `fmtDuration()` dentro de `clawd-fase7-preview.html`; portar para Kotlin, possivelmente em `util/Formatting.kt`.
+- [x] 7.2.1 Criado `app/src/main/java/com/example/claudecounter/data/SurvivalStatsRepository.kt`, mesmo padrão singleton + `SharedPreferences` de `PollingSettings`/`DisplaySettings`.
+- [x] 7.2.2 Pergunta 2 resolvida como **global**: `SurvivalState(aliveSinceMs, recordMs)` único, sem distinção por `UsageWindow`.
+- [x] 7.2.3 Pergunta 3 resolvida como **permanente** — `recordMs` nunca é arquivado/resetado.
+- [x] 7.2.4 `recordDeath(now: Long)` implementado: compara `now - aliveSinceMs` contra `recordMs`, persiste os dois valores em `SharedPreferences` e atualiza o `StateFlow`.
+- [x] 7.2.5 `formatSurvivalDuration(ms)` adicionada em `util/Formatting.kt`, portando `fmtDuration()` do preview (`Xd Yh` / `Xh Ymin` / `Xmin`).
 
 ## Fase 7.3 — Ligar a morte ao contador
 
-- [ ] 7.3.1 Em `SessionManager.detectMomentCrossing` ([SessionManager.kt](../app/src/main/java/com/example/claudecounter/SessionManager.kt)) — o mesmo ponto que já dispara `NotificationHelper.notifyClawdDown` quando `top == 100` — chamar `SurvivalStatsRepository.getInstance(appContext).recordDeath(now)`. Mesma garantia de "só na transição" que já protege a notificação contra spam a cada poll.
-- [ ] 7.3.2 Se a resposta da pergunta 2 for "por janela", cuidado: duas mortes na mesma leitura (sessão e semana baterem 100% juntas) devem gerar duas chamadas independentes, uma por janela.
+- [x] 7.3.1 `SessionManager.detectMomentCrossing` agora chama `SurvivalStatsRepository.getInstance(appContext).recordDeath(...)` no mesmo `if (top == 100)` que dispara `NotificationHelper.notifyClawdDown` — só na transição, mesma proteção contra spam.
+- [x] 7.3.2 N/A — contador é global (pergunta 2), não há duas chamadas por janela a coordenar.
 
 ## Fase 7.4 — UI do contador
 
-- [ ] 7.4.1 Faixa (`SurvivalBanner` composable novo, ou inline em `TileClawd.kt`) no rodapé da aba Clawd — abaixo dos dois `ClawdCard`, dentro do mesmo `Column` de [TileClawd.kt](../app/src/main/java/com/example/claudecounter/ui/tiles/TileClawd.kt). Estilo de referência no preview (`.survival-banner`): card `Surface` + borda `Border`, texto mono, número em `StickColors.Text` (bold), recorde em `StickColors.Accent`.
-- [ ] 7.4.2 Coletar o estado de `SurvivalStatsRepository` como `StateFlow`/recomposição periódica (o texto muda com o tempo mesmo sem novo poll — reaproveitar o `LaunchedEffect` de tick de 1s que já existe em [MonitorRoot.kt](../app/src/main/java/com/example/claudecounter/ui/MonitorRoot.kt), não precisa de um novo timer).
-- [ ] 7.4.3 Pequena animação de destaque ("flash") quando um novo recorde é batido — no preview isso é o `record-flash` (box-shadow pulsando na cor accent); portar como uma animação Compose de curta duração disparada quando `recordMs` muda para um valor maior.
-- [ ] 7.4.4 Se a contagem for "por janela" (pergunta 2), decidir layout: duas faixas menores (uma por card) em vez de uma faixa única embaixo.
+- [x] 7.4.1 `SurvivalBanner` (composable privado novo) adicionado em `TileClawd.kt`, abaixo dos dois `ClawdCard`, mesmo `Column`. Estilo do preview: `Surface` + borda `Border`/`Accent`, texto mono, elapsed em `StickColors.Text` (bold), recorde em `StickColors.Accent`.
+- [x] 7.4.2 Estado coletado via `SurvivalStatsRepository.state` (`collectAsStateWithLifecycle`); o texto usa o `now: Long` que `TileClawd` já recebia (tick de 1s de `MonitorRoot.kt`), sem timer novo.
+- [x] 7.4.3 Flash de recorde implementado com `Animatable` — borda anima de `StickColors.Border` para `StickColors.Accent` e volta (900ms) quando `recordMs` sobe.
+- [x] 7.4.4 N/A — contador global (pergunta 2), uma faixa única embaixo, como no preview.
 
 ## Fase 7.5 — Configurações (se aplicável)
 
-- [ ] 7.5.1 Se a pergunta 1 ficou "opcional" (não substituir), adicionar o switch correspondente em `SettingsScreen.kt` — seguir o padrão já existente da seção "Aparencia" ([SettingsScreen.kt](../app/src/main/java/com/example/claudecounter/ui/SettingsScreen.kt), `AppearanceSection`).
-- [ ] 7.5.2 Avaliar se o contador de sobrevivência deveria ter switch próprio ou simplesmente seguir o switch já existente "Mascote Clawd" (`DisplaySettings.showMascots`) — recomendação: seguir o existente, já que o contador só aparece dentro da aba Clawd, que já é condicional a esse switch (ver `MonitorRoot.kt`, `pages` dinâmico).
+- [x] 7.5.1 N/A — pergunta 1 resolvida como "substituir", não "opcional"; nenhum switch novo em `SettingsScreen.kt`.
+- [x] 7.5.2 N/A pela mesma razão — o contador já é condicional ao switch existente "Mascote Clawd" por estar dentro da aba Clawd.
 
 ## Verificação
 
-1. **Build:** `./gradlew assembleDebug` a partir de `c:\git\Claude-Counter-Android`.
-2. **Cena de morte:** instrumentar temporariamente `SessionManager.updateUsage` (como já foi feito para testar Fases 1-6) injetando 95 → 100 para forçar `MascotStage.KO`/`GraveScene` e conferir a legibilidade em cada tamanho (mini-card, aba Clawd, overlay).
-3. **Contador:** forçar duas "mortes" seguidas com tempo de sobrevivência diferente entre elas pra confirmar que o recorde só atualiza quando supera o anterior, e que o texto formata corretamente nas três faixas (minutos / horas / dias).
-4. **Persistência:** matar o processo do app (não só a activity) e reabrir — `aliveSinceMs`/`recordMs` devem sobreviver, já que estão em `SharedPreferences`, não em memória.
-5. Revisitar o preview (`clawd-fase7-preview.html`) lado a lado com a implementação real pra conferir fidelidade de cor/proporção antes de considerar a fase concluída.
+1. [x] **Build:** `./gradlew assembleDebug` — `BUILD SUCCESSFUL`.
+2. [ ] **Cena de morte:** instrumentar temporariamente `SessionManager.updateUsage` injetando 95 → 100 para forçar `MascotStage.KO`/`GraveScene` e conferir a legibilidade em cada tamanho (mini-card, aba Clawd, overlay). **Pendente** — não há emulador/dispositivo conectado neste ambiente (`adb devices` vazio); precisa ser feito manualmente.
+3. [ ] **Contador:** forçar duas "mortes" seguidas com tempo de sobrevivência diferente entre elas pra confirmar que o recorde só atualiza quando supera o anterior, e que o texto formata corretamente nas três faixas (minutos / horas / dias). **Pendente**, mesmo motivo.
+4. [ ] **Persistência:** matar o processo do app (não só a activity) e reabrir — `aliveSinceMs`/`recordMs` devem sobreviver. **Pendente**, mesmo motivo.
+5. [ ] Revisitar o preview (`clawd-fase7-preview.html`) lado a lado com a implementação real pra conferir fidelidade de cor/proporção. **Pendente**, mesmo motivo.

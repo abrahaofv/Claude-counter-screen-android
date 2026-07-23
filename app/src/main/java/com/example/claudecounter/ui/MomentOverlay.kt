@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.example.claudecounter.MomentEvent
 import com.example.claudecounter.MomentKind
 import com.example.claudecounter.UsageWindow
+import com.example.claudecounter.ui.brand.GraveScene
 import com.example.claudecounter.ui.brand.Mascot
 import com.example.claudecounter.ui.brand.MascotMood
 import com.example.claudecounter.ui.brand.MascotStage
@@ -122,12 +123,19 @@ fun MomentOverlay(
             val shakeOffsetX = if (stage == MascotStage.EXHAUSTED || stage == MascotStage.CRITICAL) {
                 (2f * sin(shakePhase)).dp
             } else 0.dp
-            Mascot(
-                width = 176.dp,
-                mood = MascotMood.Ok,
-                stage = stage,
-                modifier = Modifier.offset(x = shakeOffsetX, y = fallOffsetY)
-            )
+            if (stage == MascotStage.KO) {
+                GraveScene(
+                    width = 176.dp,
+                    modifier = Modifier.offset(x = shakeOffsetX, y = fallOffsetY)
+                )
+            } else {
+                Mascot(
+                    width = 176.dp,
+                    mood = MascotMood.Ok,
+                    stage = stage,
+                    modifier = Modifier.offset(x = shakeOffsetX, y = fallOffsetY)
+                )
+            }
 
             Spacer(Modifier.width(28.dp))
 

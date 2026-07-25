@@ -1,0 +1,1937 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clawd V3 — laboratório de comportamento</title>
+<style>
+  /*
+    Protótipo de avaliação para a proposta "Clawd V3". Simula uma tela do Claude
+    Counter, cuja UI é permanentemente escura (StickColors.Bg é quase preto — não
+    existe modo claro no app real). Assumir um tema só aqui é deliberado: mostrar
+    isto num shell claro representaria mal o que está sendo avaliado.
+
+    Todas as cores abaixo vêm 1:1 de ui/theme/StickColors.kt. A geometria do
+    mascote vem 1:1 de ui/brand/Mascot.kt (OuterContour + soquetes de olho) e a
+    cena de lápide de ui/brand/GraveScene.kt. Nada foi redesenhado.
+  */
+  :root {
+    color-scheme: dark;
+    --bg: #0f0f12;
+    --surface: #1a1a20;
+    --surface2: #24242c;
+    --track: #26262e;
+    --border: #30303a;
+    --text: #f2f0ec;
+    --muted: #8c8c98;
+    --faint: #5c5c68;
+    --accent: #d97757;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --blue: #7dd3fc;
+    --lilac: #c4b5fd;
+    --ko: #6a6a74;
+
+    --font-display: -apple-system, "Segoe UI Semibold", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-body: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  body {
+    padding: 28px 20px 90px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .page {
+    width: 100%;
+    max-width: 940px;
+    display: flex;
+    flex-direction: column;
+    gap: 54px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(24px, 4vw, 33px);
+    line-height: 1.14;
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .masthead p {
+    margin: 0;
+    max-width: 64ch;
+    color: var(--muted);
+    font-size: 14.5px;
+    line-height: 1.62;
+  }
+
+  .status-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+  .status-pill {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .status-pill.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 34%, var(--border)); }
+  .status-pill.decide { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 34%, var(--border)); }
+
+  /* ---------- section shell ---------- */
+
+  section.block { display: flex; flex-direction: column; gap: 16px; }
+
+  .block-head { display: flex; flex-direction: column; gap: 6px; }
+
+  .block-head .kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  .block-head h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 19px;
+    margin: 0;
+    color: var(--text);
+  }
+
+  .block-head p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13.5px;
+    line-height: 1.62;
+    max-width: 70ch;
+  }
+
+  .note {
+    font-size: 12.5px;
+    color: var(--faint);
+    line-height: 1.6;
+    max-width: 70ch;
+    margin: 0;
+  }
+  .note b { color: var(--muted); font-weight: 600; }
+
+  /* ---------- generic panel ---------- */
+
+  .panel {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 18px;
+  }
+
+  .panel.outlined { background: var(--bg); border: 1px solid var(--border); }
+
+  /* ---------- global controls ---------- */
+
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-self: center;
+  }
+
+  button.ctl {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 11px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  button.ctl:hover { color: var(--text); border-color: var(--faint); }
+  button.ctl[aria-pressed="true"] {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+  }
+
+  .ctl-sep { width: 1px; height: 18px; background: var(--border); }
+
+  .fps {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--faint);
+    padding-left: 4px;
+    min-width: 74px;
+  }
+
+  /* ---------- mascot slot ---------- */
+
+  .slot { position: relative; display: block; }
+  .slot svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+  /* ---------- hero / slider ---------- */
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 22px;
+    align-items: stretch;
+  }
+  @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
+
+  .hero-stage {
+    background: var(--surface);
+    border-radius: 18px;
+    min-height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-stage .slot { width: min(260px, 62%); }
+
+  .hero-stage .floor {
+    position: absolute;
+    left: 12%; right: 12%; bottom: 62px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+  }
+
+  .hero-side { display: flex; flex-direction: column; gap: 14px; }
+
+  .readout {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .readout .big {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 34px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+
+  .readout .stage-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+
+  .readout .sub {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--faint);
+    letter-spacing: 0.03em;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 26px;
+    background: transparent;
+    cursor: pointer;
+    margin: 0;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--bad), var(--warn) 42%, var(--ok));
+  }
+  input[type="range"]::-moz-range-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--bad), var(--warn) 42%, var(--ok));
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--text);
+    border: 3px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--text);
+    border: 3px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+
+  .slider-wrap { display: flex; flex-direction: column; gap: 6px; }
+  .slider-wrap .cap {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--faint);
+    letter-spacing: 0.06em;
+  }
+
+  .preset-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* ---------- two-up comparisons ---------- */
+
+  .duo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 620px) { .duo { grid-template-columns: 1fr; } }
+
+  .duo-col { display: flex; flex-direction: column; gap: 10px; }
+
+  .duo-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .duo-label .line { flex: 1; height: 1px; background: var(--border); }
+  .duo-label.is-new { color: var(--accent); }
+
+  .duo-stage {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 26px 16px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    min-height: 220px;
+    justify-content: center;
+  }
+  .duo-stage .slot { width: 150px; }
+
+  .duo-caption {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--faint);
+    text-align: center;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- gallery ---------- */
+
+  .gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+    gap: 10px;
+  }
+
+  .gal-card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 16px 8px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 9px;
+    text-align: center;
+  }
+  .gal-card .slot { width: 78px; }
+
+  .gal-name {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .gal-sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--faint); }
+
+  .gal-dot-row { display: flex; align-items: center; gap: 5px; }
+  .gal-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dot, var(--accent)); }
+
+  /* ---------- timeline log ---------- */
+
+  .log-grid {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 14px;
+  }
+  @media (max-width: 700px) { .log-grid { grid-template-columns: 1fr; } }
+
+  .log {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    height: 236px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column-reverse;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.85;
+  }
+
+  .log-row { display: flex; gap: 10px; white-space: nowrap; }
+  .log-row .t { color: var(--faint); }
+  .log-row .a { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .log-row .d { color: var(--accent); }
+  .log-row.reflex .a { color: var(--muted); }
+  .log-row.reflex .d { color: var(--faint); }
+
+  .histo { display: flex; flex-direction: column; gap: 7px; }
+  .histo-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10.5px; }
+  .histo-row .nm { width: 92px; color: var(--muted); }
+  .histo-row .bar { flex: 1; height: 5px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .histo-row .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s; }
+  .histo-row .n { width: 22px; text-align: right; color: var(--faint); }
+
+  /* ---------- size test ---------- */
+
+  .sizes {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 26px;
+    flex-wrap: wrap;
+    padding: 26px 16px 18px;
+  }
+
+  .size-item { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+  .size-box {
+    position: relative;
+    border: 1px dashed var(--border);
+    border-radius: 3px;
+  }
+  .size-box .slot {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .size-tag { font-family: var(--font-mono); font-size: 10px; color: var(--faint); letter-spacing: 0.04em; }
+  .size-where { font-family: var(--font-mono); font-size: 9.5px; color: color-mix(in srgb, var(--faint) 70%, transparent); }
+
+  /* ---------- grave ---------- */
+
+  .grave-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 620px) { .grave-row { grid-template-columns: 1fr; } }
+  .grave-stage {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 210px;
+  }
+  .grave-stage .slot { width: 150px; }
+
+  /* ---------- port table ---------- */
+
+  .table-scroll { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    min-width: 600px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    line-height: 1.55;
+  }
+  th {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 400;
+  }
+  td:first-child { color: var(--text); font-weight: 500; width: 27%; }
+  td { color: var(--muted); }
+  td code, .note code, p code {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  .verdict {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .verdict .v-card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-left: 2px solid var(--border);
+  }
+  .verdict .v-card.good { border-left-color: var(--ok); }
+  .verdict .v-card.warn { border-left-color: var(--warn); }
+  .verdict .v-card.cost { border-left-color: var(--accent); }
+  .verdict .v-t {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .verdict .v-b { font-size: 13px; color: var(--muted); line-height: 1.55; }
+  .verdict .v-b b { color: var(--text); font-weight: 600; }
+
+  footer.foot {
+    border-top: 1px solid var(--border);
+    padding-top: 20px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--faint);
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<!-- gradientes compartilhados por todas as instâncias -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <radialGradient id="clawd-glow">
+      <stop offset="0%" stop-color="#d97757" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#d97757" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#d97757" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="clawd-spirit">
+      <stop offset="0%" stop-color="#c4b5fd" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#c4b5fd" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">Claude Counter · avaliação de proposta</div>
+    <h1>Clawd V3 — laboratório de comportamento</h1>
+    <p>
+      Protótipo para decidir se vale codificar. A silhueta, as proporções e as cores são
+      as do <code>Mascot.kt</code> atual, sem uma linha redesenhada — o que muda é o
+      <b>motor</b>: em vez de quatro loops de período fixo, um agendador que sorteia
+      comportamentos e persegue alvos com amortecimento.
+    </p>
+    <div class="status-row">
+      <span class="status-pill done">lápide/fantasma · já implementado (fase 7)</span>
+      <span class="status-pill decide">anatomia: puro × estendido · decidir</span>
+      <span class="status-pill decide">V3 em todas as superfícies · confirmar em 42dp</span>
+    </div>
+  </header>
+
+  <div class="toolbar" role="group" aria-label="Controles globais">
+    <button class="ctl" id="btn-pause" aria-pressed="false">pausar</button>
+    <button class="ctl" id="btn-slow" aria-pressed="false">câmera lenta 0,25×</button>
+    <span class="ctl-sep"></span>
+    <button class="ctl" id="btn-layers" aria-pressed="false">ver camadas</button>
+    <button class="ctl" id="btn-anat" aria-pressed="false">anatomia estendida</button>
+    <span class="ctl-sep"></span>
+    <span class="fps" id="fps">— fps</span>
+  </div>
+
+  <!-- ============ 1. SLIDER ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">01 · demonstração principal</div>
+      <h2>Vitalidade contínua</h2>
+      <p>
+        Arraste. Não existem seis sprites: existe um vetor de parâmetros que é função
+        contínua da vitalidade, e cada parâmetro persegue seu alvo com mola amortecida.
+        É daí que sai o requisito “transições de 300–600 ms” — de graça, sem código de
+        transição.
+      </p>
+    </div>
+
+    <div class="hero">
+      <div class="hero-stage">
+        <div class="floor"></div>
+        <div class="slot" id="hero-slot"></div>
+      </div>
+
+      <div class="hero-side">
+        <div class="readout">
+          <div class="big" id="ro-vit">100%</div>
+          <div class="stage-label" id="ro-stage">DESCANSADO</div>
+          <div class="sub" id="ro-usage">uso da janela: 0%</div>
+        </div>
+
+        <div class="slider-wrap">
+          <input type="range" id="vit" min="0" max="100" step="1" value="100" aria-label="Vitalidade">
+          <div class="cap"><span>0 · morto</span><span>100 · feliz</span></div>
+        </div>
+
+        <div class="preset-row">
+          <button class="ctl" data-vit="88">descansado</button>
+          <button class="ctl" data-vit="62">trabalhando</button>
+          <button class="ctl" data-vit="40">suando</button>
+          <button class="ctl" data-vit="20">exausto</button>
+          <button class="ctl" data-vit="5">no limite</button>
+          <button class="ctl" data-vit="0">morto</button>
+        </div>
+
+        <div class="preset-row">
+          <button class="ctl" data-force="jump">pulinho</button>
+          <button class="ctl" data-force="yawn">bocejar</button>
+          <button class="ctl" data-force="stretch">espreguiçar</button>
+          <button class="ctl" data-force="wipe">limpar suor</button>
+          <button class="ctl" data-force="surprise">surpresa</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      A sombra não existe hoje. Ela e o salto exigem margem vertical: a caixa de desenho
+      passa de <code>24×15</code> para <code>32×22</code> unidades, o que move
+      <code>MascotAspectRatio</code> de <b>0,625</b> para <b>0,6875</b> — diferença pequena,
+      mas o ícone 42×26 do header é calculado a partir dela.
+    </p>
+  </section>
+
+  <!-- ============ 2. PURO x ESTENDIDO ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">02 · decisão pendente</div>
+      <h2>Puro × Estendido</h2>
+      <p>
+        O infográfico da proposta mostra um Clawd com boca, sobrancelhas, braços e laptop.
+        O Clawd real tem corpo e dois soquetes de olho — “bocejar”, “limpar o suor” e
+        “expressão triste” não são expressáveis com o que existe. À esquerda, as ações
+        resolvidas só com corpo, olhos e sombra. À direita, os dois blocos laterais que
+        <i>já fazem parte da silhueta</i> viram braços articulados, e uma boca aparece
+        só durante o bocejo. Em repouso, os dois são pixel a pixel idênticos.
+      </p>
+    </div>
+
+    <div class="duo">
+      <div class="duo-col">
+        <div class="duo-label"><span>Puro · geometria intocada</span><span class="line"></span></div>
+        <div class="duo-stage"><div class="slot" id="anat-pure"></div></div>
+        <div class="duo-caption">bocejo = olhos apertando + corpo inflando<br>limpar suor = inclinada rápida que sacode a gota</div>
+      </div>
+      <div class="duo-col">
+        <div class="duo-label is-new"><span>Estendido · nubs articulados</span><span class="line"></span></div>
+        <div class="duo-stage"><div class="slot" id="anat-ext"></div></div>
+        <div class="duo-caption">bocejo = boca abrindo<br>limpar suor = braço cruzando a testa</div>
+      </div>
+    </div>
+
+    <div class="preset-row" style="justify-content:center">
+      <button class="ctl" data-force2="yawn">bocejar nos dois</button>
+      <button class="ctl" data-force2="wipe">limpar suor nos dois</button>
+      <button class="ctl" data-force2="stretch">espreguiçar nos dois</button>
+      <button class="ctl" data-force2="jump">pular nos dois</button>
+    </div>
+
+    <p class="note">
+      No modo estendido o corpo é desenhado sem os dois blocos laterais e eles voltam como
+      elementos próprios, girando em torno do ombro. Nenhuma forma nova entra na silhueta —
+      só passa a existir uma articulação onde antes havia pixel colado.
+    </p>
+  </section>
+
+  <!-- ============ 3. ATUAL x V3 ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">03 · a evidência</div>
+      <h2>Atual × V3, mesma vitalidade</h2>
+      <p>
+        À esquerda, um port fiel do <code>Mascot.kt</code> de hoje: quatro
+        <code>rememberInfiniteTransition</code> de período fixo, troca de estágio
+        instantânea, sem sombra, sem física. À direita, o V3. Ambos seguem o slider da
+        seção 1. Se a diferença não convencer aqui, o protótipo cumpriu o papel dele
+        dizendo <b>não codifique</b>.
+      </p>
+    </div>
+
+    <div class="duo">
+      <div class="duo-col">
+        <div class="duo-label"><span>Atual · Mascot.kt</span><span class="line"></span></div>
+        <div class="duo-stage"><div class="slot" id="cmp-v1"></div></div>
+        <div class="duo-caption" id="cmp-v1-cap">bob senoidal · piscada nos últimos 150 ms do ciclo</div>
+      </div>
+      <div class="duo-col">
+        <div class="duo-label is-new"><span>V3 · motor procedural</span><span class="line"></span></div>
+        <div class="duo-stage"><div class="slot" id="cmp-v3"></div></div>
+        <div class="duo-caption" id="cmp-v3-cap">respiração + fila sorteada + molas</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. GALERIA ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">04 · os seis estados</div>
+      <h2>Todos vivos ao mesmo tempo</h2>
+      <p>
+        Rodando em paralelo com sementes independentes — dois Clawds no mesmo estado nunca
+        piscam juntos. É o teste mais direto de “isso parece loop?”.
+      </p>
+    </div>
+    <div class="gallery" id="gallery"></div>
+    <p class="note">
+      A escada da proposta (100 / 80 / 60 / 30 / 10 / 0) <b>não é a do app</b>:
+      <code>stageFor()</code> corta em 25 / 50 / 70 / 90 / 100 <i>de uso</i>, ou seja
+      vitalidade 75 / 50 / 30 / 10 / 0. Vitalidade 80 ainda é <code>RESTED</code>, não
+      “trabalhando”. As âncoras aqui foram colocadas nos cortes reais, e cada card acima
+      é o meio de uma faixa — assim cada estágio existente ganha uma personalidade
+      inteira, em vez de duas personalidades brigando dentro da mesma faixa.
+    </p>
+  </section>
+
+  <!-- ============ 5. TIMELINE ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">05 · o motor por dentro</div>
+      <h2>Linha do tempo procedural</h2>
+      <p>
+        O que o agendador sorteou, com o intervalo real desde a ação anterior. Duas ações
+        exclusivas nunca colidem (há trava global); piscar corre num canal reflexo à parte,
+        como na animação de verdade. Deixe rodar um minuto e procure um intervalo repetido.
+      </p>
+    </div>
+
+    <div class="log-grid">
+      <div class="log" id="log" aria-live="off">
+        <div class="log-row reflex" id="log-empty"><span class="a">aguardando o agendador…</span></div>
+      </div>
+      <div class="panel">
+        <div class="duo-label" style="margin-bottom:12px"><span>Frequência</span><span class="line"></span></div>
+        <div class="histo" id="histo"></div>
+        <p class="note" style="margin-top:14px">
+          Os pesos vêm da vitalidade: pulinho some abaixo de ~55, bocejo aparece a partir
+          dali, espreguiçar é raro em qualquer ponto.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. TAMANHOS ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">06 · o teste que decide o escopo</div>
+      <h2>O mesmo Clawd nos cinco tamanhos reais</h2>
+      <p>
+        A escolha foi “V3 em todos os lugares”. Estes são os cinco <code>Mascot(width=)</code>
+        que existem no app. O tracejado marca a caixa de hoje; o desenho vaza dela por causa
+        da sombra e do salto. Olhe o de 42 dp: se ali o microdetalhe virar ruído ou sumir,
+        vale manter header e card no motor barato.
+      </p>
+    </div>
+
+    <div class="panel outlined sizes" id="sizes"></div>
+
+    <p class="note">
+      Custo real do “em todos os lugares”: cinco instâncias vivas, sendo que
+      <code>MonitorPager</code> mantém páginas fora de tela compostas e o app já roda
+      polling em background. A mitigação é um relógio único no nível do app
+      (<code>withInfiniteAnimationFrameMillis</code>) e pausa por visibilidade — aqui isso
+      está simulado com <code>IntersectionObserver</code>: role a página e veja o fps não
+      afundar.
+    </p>
+  </section>
+
+  <!-- ============ 7. DESCANSO ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">07 · já existe</div>
+      <h2>Cena de descanso</h2>
+      <p>
+        A seção “💀 Descanso” da proposta descreve o que foi implementado na fase 7:
+        lápide de pixel art, fantasma coral flutuando, sombra suave, movimento vertical
+        lento. Está no app hoje, em <code>GraveScene.kt</code>. O que sobra de novo ali
+        é uma coisa só — partículas espirituais.
+      </p>
+    </div>
+
+    <div class="grave-row">
+      <div class="duo-col">
+        <div class="duo-label"><span>Hoje · GraveScene.kt</span><span class="line"></span></div>
+        <div class="grave-stage"><div class="slot" id="grave-now"></div></div>
+      </div>
+      <div class="duo-col">
+        <div class="duo-label is-new"><span>+ partículas espirituais</span><span class="line"></span></div>
+        <div class="grave-stage"><div class="slot" id="grave-new"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 8. PORTE ============ -->
+  <section class="block">
+    <div class="block-head">
+      <div class="kicker">08 · custo</div>
+      <h2>O que cada mecanismo vira em Compose</h2>
+    </div>
+
+    <div class="panel table-scroll">
+      <table>
+        <thead>
+          <tr><th>Mecanismo do lab</th><th>Em Compose</th><th>Substitui</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Vitalidade contínua → traits</td>
+            <td><code>MascotParams</code> (data class de floats) + interpolação entre 6 âncoras</td>
+            <td><code>motionFor()</code>, <code>bodyColorFor()</code>, <code>eyeStyleFor()</code>, o enum <code>EyeStyle</code></td>
+          </tr>
+          <tr>
+            <td>Molas / amortecimento</td>
+            <td>um <code>Animatable</code> por campo com <code>spring()</code>, ou um integrador próprio no frame loop</td>
+            <td>a troca instantânea de estágio</td>
+          </tr>
+          <tr>
+            <td>Relógio único</td>
+            <td><code>withInfiniteAnimationFrameMillis</code> dentro de um <code>LaunchedEffect</code>, escrevendo num holder <code>@Stable</code></td>
+            <td>os 4 <code>rememberInfiniteTransition</code> (bob/blink/shake/tear)</td>
+          </tr>
+          <tr>
+            <td>Fila de ações + trava</td>
+            <td>classe <code>BehaviorScheduler</code> nova (~120 linhas), sem Compose dentro</td>
+            <td>nada — não existe hoje</td>
+          </tr>
+          <tr>
+            <td>Camadas independentes</td>
+            <td><code>drawIntoCanvas</code>/<code>withTransform</code> por camada no mesmo <code>Canvas</code></td>
+            <td>o <code>scale(...) { translate(...) { … } }</code> que hoje move o desenho inteiro</td>
+          </tr>
+          <tr>
+            <td>Partículas</td>
+            <td><code>Array&lt;Particle&gt;</code> de tamanho fixo, sem alocação por frame</td>
+            <td><code>drawSweat()</code> (gotas em fase fixa)</td>
+          </tr>
+          <tr>
+            <td>Sombra + squash &amp; stretch</td>
+            <td><code>drawOval</code> derivado da altura do salto; caixa passa a <code>32×22</code></td>
+            <td><code>MascotAspectRatio = 0,625</code> e os 5 call sites que dependem dele</td>
+          </tr>
+          <tr>
+            <td>Pausa por visibilidade</td>
+            <td><code>LifecycleResumeEffect</code> + estado de página do <code>MonitorPager</code></td>
+            <td>nada — hoje os loops rodam sempre</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="verdict">
+      <div class="v-card good">
+        <div class="v-t">Barato</div>
+        <div class="v-b">Traits contínuos, molas e transições suaves. <b>Reescreve o miolo do Mascot.kt</b>, mas não toca em nenhum call site.</div>
+      </div>
+      <div class="v-card cost">
+        <div class="v-t">Médio</div>
+        <div class="v-b">Agendador, camadas e partículas. Arquivo novo + <code>Mascot.kt</code> reestruturado. <b>É o grosso do trabalho.</b></div>
+      </div>
+      <div class="v-card warn">
+        <div class="v-t">Cuidado</div>
+        <div class="v-b">Sombra muda a caixa e o <code>MascotAspectRatio</code> — mexe em <b>5 call sites</b> e no ícone do header. E o frame loop precisa pausar fora de tela.</div>
+      </div>
+      <div class="v-card good">
+        <div class="v-t">Já feito</div>
+        <div class="v-b">Lápide, fantasma, bob e sombra da cena de morte. <b>Fase 7 entregou.</b> Falta só partícula espiritual.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Geometria de <code>Mascot.kt</code> (OuterContour + soquetes) e <code>GraveScene.kt</code>, paleta de
+    <code>StickColors.kt</code>. Nenhuma requisição externa. Companheiro de
+    <code>clawd-fase7-preview.html</code> — abra os dois lado a lado para conferir fidelidade.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* =========================================================================
+     GEOMETRIA — portada 1:1, nada redesenhado
+     ========================================================================= */
+
+  // OuterContour + os dois soquetes de olho (evenodd), de Mascot.kt.
+  var BODY_D =
+    "M20.998,10.949 L24,10.949 L24,14.051 L21,14.051 L21,17.079 L19.513,17.079 " +
+    "L19.513,20 L18,20 L18,17.079 L16.513,17.079 L16.513,20 L15,20 L15,17.079 " +
+    "L9,17.079 L9,20 L7.488,20 L7.488,17.079 L6,17.079 L6,20 L4.487,20 " +
+    "L4.487,17.079 L3,17.079 L3,14.05 L0,14.05 L0,10.95 L3,10.95 L3,5 L20.998,5 Z " +
+    "M6,8.102 L7.488,8.102 L7.488,10.949 L6,10.949 Z " +
+    "M16.51,8.102 L18,8.102 L18,10.949 L16.51,10.949 Z";
+
+  // O mesmo corpo com os dois blocos laterais removidos: no modo estendido eles
+  // voltam como elementos giratórios, de modo que em repouso o desenho é idêntico.
+  var BODY_NOARM_D =
+    "M21,5 L21,17.079 L19.513,17.079 L19.513,20 L18,20 L18,17.079 " +
+    "L16.513,17.079 L16.513,20 L15,20 L15,17.079 L9,17.079 L9,20 L7.488,20 " +
+    "L7.488,17.079 L6,17.079 L6,20 L4.487,20 L4.487,17.079 L3,17.079 L3,5 Z " +
+    "M6,8.102 L7.488,8.102 L7.488,10.949 L6,10.949 Z " +
+    "M16.51,8.102 L18,8.102 L18,10.949 L16.51,10.949 Z";
+
+  var ARM_L = { x: 0,  y: 10.95, w: 3, h: 3.101, px: 3,  py: 12.5 };
+  var ARM_R = { x: 21, y: 10.95, w: 3, h: 3.101, px: 21, py: 12.5 };
+
+  var EYE_L = { x: 6,     y: 8.102, w: 1.488, h: 2.847 };
+  var EYE_R = { x: 16.51, y: 8.102, w: 1.49,  h: 2.847 };
+
+  var FOOT_Y = 20;      // linha do chão, em unidades do viewBox
+  var BOX = { x: -4, y: 1, w: 32, h: 22 };
+  var VIEWBOX = BOX.x + " " + BOX.y + " " + BOX.w + " " + BOX.h;
+
+  // Mascot.kt aplica bob/shake em px crus; a referência é a aba Clawd (96 dp
+  // para 24 unidades), então 1 px ≈ 0,25 unidade.
+  var PX = 24 / 96;
+
+  /* =========================================================================
+     MATEMÁTICA
+     ========================================================================= */
+
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  function ease(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function hex2rgb(h) {
+    var n = parseInt(h.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function rgb2css(c) {
+    return "rgb(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + ")";
+  }
+  function mixRgb(a, b, t) {
+    return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+  }
+
+  /** Mola de segunda ordem: aceleração, desaceleração, overshoot, amortecimento. */
+  function Spring(v, k, d) { this.v = v; this.t = v; this.vel = 0; this.k = k; this.d = d; }
+  Spring.prototype.step = function (dt) {
+    // subpassos para não explodir se o navegador engasgar
+    var n = Math.max(1, Math.ceil(dt / 0.016));
+    var h = dt / n;
+    for (var i = 0; i < n; i++) {
+      this.vel += (this.k * (this.t - this.v) - this.d * this.vel) * h;
+      this.v += this.vel * h;
+    }
+  };
+
+  /* =========================================================================
+     TRAITS — função contínua da vitalidade
+     As cores são exatamente as de bodyColorFor(): coral puro, misturado um
+     pouco na direção do gradiente de uso conforme o esforço sobe.
+
+     As seis âncoras caem exatamente nos cortes de stageFor() — vitalidade
+     100/75/50/30/10/0 é uso 0/25/50/70/90/100 —, de modo que cada estágio do app
+     ocupa um intervalo inteiro e a personalidade interpola entre as duas pontas.
+     ========================================================================= */
+
+  var ANCHORS = [
+    { v: 100, breath: 3.4, depth: 0.016, drop: 0.00, tremor: 0.00, open: 1.00, pupil: 1.00,
+      tint: "#D97757", glow: 0.42, sweat: 0.00, spark: 0.55, blink: [2.2, 6.5], lag: 1.0,
+      w: { look: 1.0, lookUp: 0.5, tilt: 0.5, jump: 1.0, stretch: 0.18, yawn: 0.04, wipe: 0, surprise: 0.2, settle: 0.7 } },
+
+    { v: 75,  breath: 2.6, depth: 0.013, drop: 0.15, tremor: 0.00, open: 0.96, pupil: 0.96,
+      tint: "#D97757", glow: 0.16, sweat: 0.00, spark: 0.10, blink: [1.8, 5.0], lag: 1.0,
+      w: { look: 1.4, lookUp: 0.2, tilt: 0.6, jump: 0.22, stretch: 0.12, yawn: 0.05, wipe: 0, surprise: 0.15, settle: 1.1 } },
+
+    { v: 50,  breath: 1.9, depth: 0.019, drop: 0.42, tremor: 0.035, open: 0.83, pupil: 0.88,
+      tint: "#DE824F", glow: 0.05, sweat: 0.38, spark: 0.00, blink: [1.2, 3.4], lag: 1.15,
+      w: { look: 1.1, lookUp: 0.15, tilt: 0.5, jump: 0.06, stretch: 0.10, yawn: 0.16, wipe: 0.60, surprise: 0.10, settle: 1.0 } },
+
+    { v: 30,  breath: 1.5, depth: 0.030, drop: 1.05, tremor: 0.10, open: 0.55, pupil: 0.76,
+      tint: "#E2894A", glow: 0.00, sweat: 0.72, spark: 0.00, blink: [0.9, 2.6], lag: 1.6,
+      w: { look: 0.55, lookUp: 0.05, tilt: 0.35, jump: 0, stretch: 0.22, yawn: 0.90, wipe: 0.50, surprise: 0.05, settle: 0.8 } },
+
+    { v: 10,  breath: 1.25, depth: 0.038, drop: 1.75, tremor: 0.27, open: 0.37, pupil: 0.62,
+      tint: "#E47560", glow: 0.00, sweat: 1.10, spark: 0.00, blink: [0.7, 2.0], lag: 2.3,
+      w: { look: 0.25, lookUp: 0.02, tilt: 0.20, jump: 0, stretch: 0.04, yawn: 0.55, wipe: 0.22, surprise: 0.02, settle: 0.6 } },
+
+    { v: 0,   breath: 1.10, depth: 0.042, drop: 2.20, tremor: 0.34, open: 0.28, pupil: 0.55,
+      tint: "#E47560", glow: 0.00, sweat: 1.30, spark: 0.00, blink: [0.6, 1.7], lag: 2.8,
+      w: { look: 0.15, lookUp: 0.01, tilt: 0.15, jump: 0, stretch: 0.02, yawn: 0.40, wipe: 0.15, surprise: 0.01, settle: 0.5 } }
+  ];
+
+  var ACTION_KEYS = ["look", "lookUp", "tilt", "jump", "stretch", "yawn", "wipe", "surprise", "settle"];
+
+  var HISTO_NAMES = {
+    look: "olhar", lookUp: "olhar p/ cima", tilt: "inclinar", jump: "pulinho",
+    stretch: "espreguiçar", yawn: "bocejar", wipe: "limpar suor",
+    surprise: "surpresa", settle: "postura"
+  };
+
+  ANCHORS.forEach(function (a) { a.tintRgb = hex2rgb(a.tint); });
+
+  function traitsFor(vit) {
+    var v = clamp(vit, 0, 100);
+    var hi = ANCHORS[0], lo = ANCHORS[ANCHORS.length - 1], t = 0;
+    for (var i = 0; i < ANCHORS.length - 1; i++) {
+      if (v <= ANCHORS[i].v && v >= ANCHORS[i + 1].v) {
+        hi = ANCHORS[i]; lo = ANCHORS[i + 1];
+        t = (hi.v - v) / (hi.v - lo.v);
+        break;
+      }
+    }
+    var out = {
+      breath: lerp(hi.breath, lo.breath, t),
+      depth: lerp(hi.depth, lo.depth, t),
+      drop: lerp(hi.drop, lo.drop, t),
+      tremor: lerp(hi.tremor, lo.tremor, t),
+      open: lerp(hi.open, lo.open, t),
+      pupil: lerp(hi.pupil, lo.pupil, t),
+      glow: lerp(hi.glow, lo.glow, t),
+      sweat: lerp(hi.sweat, lo.sweat, t),
+      spark: lerp(hi.spark, lo.spark, t),
+      lag: lerp(hi.lag, lo.lag, t),
+      blinkMin: lerp(hi.blink[0], lo.blink[0], t),
+      blinkMax: lerp(hi.blink[1], lo.blink[1], t),
+      rgb: mixRgb(hi.tintRgb, lo.tintRgb, t),
+      w: {}
+    };
+    for (var k = 0; k < ACTION_KEYS.length; k++) {
+      var key = ACTION_KEYS[k];
+      out.w[key] = lerp(hi.w[key], lo.w[key], t);
+    }
+    out.css = rgb2css(out.rgb);
+    return out;
+  }
+
+  /* stageFor() de Mascot.kt, em termos de vitalidade (vitalidade = 100 − uso) */
+  var STAGES = [
+    { max: 0.5,  key: "ko",        label: "MORTO",       nice: "Descanso",     color: "#6A6A74" },
+    { max: 10,   key: "critical",  label: "NO LIMITE",   nice: "Crítico",      color: "#F87171" },
+    { max: 30,   key: "exhausted", label: "EXAUSTO",     nice: "Exausto",      color: "#FBBF24" },
+    { max: 50,   key: "straining", label: "SUANDO",      nice: "Suando",       color: "#FBBF24" },
+    { max: 75,   key: "working",   label: "TRABALHANDO", nice: "Trabalhando",  color: "#4ADE80" },
+    { max: 101,  key: "rested",    label: "DESCANSADO",  nice: "Feliz",        color: "#4ADE80" }
+  ];
+  function stageFor(vit) {
+    for (var i = 0; i < STAGES.length; i++) if (vit <= STAGES[i].max) return STAGES[i];
+    return STAGES[STAGES.length - 1];
+  }
+
+  /* Um representante no meio de cada faixa — é isto que a galeria e os presets
+     mostram, e não a escada 100/80/60/30/10/0 da proposta, que não coincide com
+     os cortes do app (vitalidade 80, por exemplo, ainda é DESCANSADO). */
+  var GALLERY = [
+    { v: 88 }, { v: 62 }, { v: 40 }, { v: 20 }, { v: 5 }, { v: 0 }
+  ];
+
+  /* =========================================================================
+     AÇÕES
+     ========================================================================= */
+
+  var ACTIONS = {
+    look:     { dur: [1.0, 2.0],  pt: function (d) { return "olhar para a " + (d < 0 ? "esquerda" : "direita"); } },
+    lookUp:   { dur: [0.9, 1.5],  pt: function () { return "olhar para cima"; } },
+    tilt:     { dur: [1.0, 1.8],  pt: function () { return "inclinar a cabeça"; } },
+    jump:     { dur: [0.78, 0.78],pt: function () { return "pulinho"; } },
+    stretch:  { dur: [1.7, 1.7],  pt: function () { return "espreguiçar"; } },
+    yawn:     { dur: [1.5, 1.5],  pt: function () { return "bocejar"; } },
+    wipe:     { dur: [0.95, 0.95],pt: function () { return "limpar o suor"; } },
+    surprise: { dur: [0.8, 0.8],  pt: function () { return "surpresa"; } },
+    settle:   { dur: [0.9, 1.4],  pt: function () { return "ajustar postura"; } }
+  };
+
+  /* =========================================================================
+     INSTÂNCIA
+     ========================================================================= */
+
+  var uid = 0;
+
+  function Clawd(host, opts) {
+    opts = opts || {};
+    this.id = ++uid;
+    this.host = host;
+    this.engine = opts.engine || "v3";      // "v3" | "v1"
+    this.extended = !!opts.extended;
+    this.showShadow = opts.shadow !== false;
+    this.particles = opts.particles !== false;
+    this.onAction = opts.onAction || null;
+    this.vitTarget = opts.vitality != null ? opts.vitality : 100;
+
+    this.vit = new Spring(this.vitTarget, 42, 13);   // a transição entre estados
+    this.t = 0;
+    this.breathPhase = Math.random() * Math.PI * 2;
+    this.visible = true;
+
+    this.posture = new Spring(0, 90, 17);
+    this.lookX = new Spring(0, 150, 20);
+    this.lookY = new Spring(0, 150, 20);
+    this.tilt = new Spring(0, 70, 13);
+    this.armR = new Spring(0, 130, 17);
+    this.armL = new Spring(0, 130, 17);
+    // quanto o braço direito "alcança" para dentro do rosto: só girar no ombro
+    // deixaria o nub dentro da própria silhueta, invisível.
+    this.reach = new Spring(0, 130, 18);
+    this.mouth = new Spring(0, 160, 22);
+    this.pupilBoost = new Spring(1, 120, 18);
+
+    this.action = null;
+    this.actionT = 0;
+    this.actionDur = 0;
+    this.actionDir = 1;
+    this.nextActionAt = rnd(0.4, 2.0);
+
+    this.blinkAt = rnd(0.6, 2.5);
+    this.blinkT = -1;
+    this.blinkDur = 0.14;
+
+    this.jumpH = 0;
+    this.squashY = 1;
+    this.glitchUntil = -1;
+    this.frozen = null;
+
+    this.sweatAcc = 0;
+    this.sparkAcc = 0;
+    this.pool = [];
+
+    this.build();
+    ALL.push(this);
+  }
+
+  var SWEAT_N = 5, SPARK_N = 6, POOL_N = SWEAT_N + SPARK_N;
+
+  Clawd.prototype.build = function () {
+    var ns = "http://www.w3.org/2000/svg";
+    this.pool = [];
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", VIEWBOX);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Clawd");
+
+    function el(tag, attrs, parent) {
+      var n = document.createElementNS(ns, tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      (parent || svg).appendChild(n);
+      return n;
+    }
+
+    // camada: brilho
+    this.gGlow = el("ellipse", { cx: 12, cy: 12, rx: 17, ry: 13, fill: "url(#clawd-glow)", opacity: 0 });
+
+    // camada: partículas (atrás do corpo)
+    this.gPart = el("g", { "class": "lyr-part" });
+    for (var i = 0; i < POOL_N; i++) {
+      this.pool.push({
+        node: el("rect", { x: 0, y: 0, width: 0.6, height: 0.6, rx: 0.2, fill: "#fff", opacity: 0 }, this.gPart),
+        alive: false, kind: "", x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, size: 0.6
+      });
+    }
+
+    // camada: sombra
+    this.gShadow = el("ellipse", {
+      cx: 12, cy: FOOT_Y + 1.1, rx: 8.4, ry: 1.5,
+      fill: "#000", opacity: this.showShadow ? 0.34 : 0
+    });
+
+    // camada: raiz (postura, tremor, salto, inclinação)
+    this.gRoot = el("g", {});
+    // camada: corpo (squash & stretch, ancorado nos pés)
+    this.gBody = el("g", {}, this.gRoot);
+
+    this.body = el("path", { d: this.extended ? BODY_NOARM_D : BODY_D, "fill-rule": "evenodd", fill: "#D97757" }, this.gBody);
+
+    if (this.extended) {
+      this.armLNode = el("rect", { x: ARM_L.x, y: ARM_L.y, width: ARM_L.w, height: ARM_L.h, fill: "#D97757" }, this.gBody);
+      this.armRNode = el("rect", { x: ARM_R.x, y: ARM_R.y, width: ARM_R.w, height: ARM_R.h, fill: "#D97757" }, this.gBody);
+      this.mouthNode = el("rect", { x: 10.3, y: 13.0, width: 3.4, height: 0, rx: 0.85, fill: "rgba(0,0,0,0.72)" }, this.gBody);
+    }
+
+    // camada: olhos (pupila + pálpebra por soquete)
+    this.eyes = [];
+    [EYE_L, EYE_R].forEach(function (s) {
+      this.eyes.push({
+        socket: s,
+        pupil: el("rect", { x: 0, y: 0, width: 0, height: 0, rx: 0.26, fill: "rgba(0,0,0,0.8)" }, this.gBody),
+        lid: el("rect", { x: s.x, y: s.y, width: s.w, height: 0, rx: 0.22, fill: "#D97757" }, this.gBody),
+        x1: el("line", { x1: s.x, y1: s.y, x2: s.x + s.w, y2: s.y + s.h, stroke: "#F87171", "stroke-width": s.w * 0.28, "stroke-linecap": "round", opacity: 0 }, this.gBody),
+        x2: el("line", { x1: s.x + s.w, y1: s.y, x2: s.x, y2: s.y + s.h, stroke: "#F87171", "stroke-width": s.w * 0.28, "stroke-linecap": "round", opacity: 0 }, this.gBody)
+      });
+    }, this);
+
+    this.host.innerHTML = "";
+    this.host.appendChild(svg);
+    this.svg = svg;
+
+    var self = this;
+    if (typeof IntersectionObserver !== "undefined" && !this.io) {
+      this.io = new IntersectionObserver(function (entries) {
+        self.visible = entries[0].isIntersecting;
+      }, { rootMargin: "120px" });
+      this.io.observe(this.host);
+    }
+  };
+
+  Clawd.prototype.setVitality = function (v) { this.vitTarget = v; this.vit.t = v; };
+
+  Clawd.prototype.force = function (key) {
+    if (!ACTIONS[key]) return;
+    this.startAction(key);
+    this.nextActionAt = this.t + this.actionDur + rnd(0.9, 2.2);
+  };
+
+  Clawd.prototype.startAction = function (key) {
+    var a = ACTIONS[key];
+    this.action = key;
+    this.actionT = 0;
+    this.actionDur = rnd(a.dur[0], a.dur[1]);
+    this.actionDir = Math.random() < 0.5 ? -1 : 1;
+    if (this.onAction) this.onAction(key, a.pt(this.actionDir), this.t);
+  };
+
+  Clawd.prototype.pickAction = function (tr) {
+    var total = 0, i, key;
+    for (i = 0; i < ACTION_KEYS.length; i++) total += tr.w[ACTION_KEYS[i]];
+    if (total <= 0) return null;
+    var r = Math.random() * total;
+    for (i = 0; i < ACTION_KEYS.length; i++) {
+      key = ACTION_KEYS[i];
+      r -= tr.w[key];
+      if (r <= 0) return key;
+    }
+    return "settle";
+  };
+
+  /* --------------------------- update ---------------------------------- */
+
+  Clawd.prototype.update = function (dt) {
+    this.t += dt;
+    this.vit.step(dt);
+    var tr = traitsFor(this.vit.v);
+    this.tr = tr;
+
+    if (this.engine === "v1") { this.updateV1(dt); return; }
+
+    // --- contínuo: respiração ---
+    this.breathPhase += (dt / tr.breath) * Math.PI * 2;
+    var breath = Math.sin(this.breathPhase);
+
+    // --- reflexo: piscar (canal próprio, suprimido durante bocejo) ---
+    if (this.blinkT >= 0) {
+      this.blinkT += dt;
+      if (this.blinkT > this.blinkDur) this.blinkT = -1;
+    } else if (this.t >= this.blinkAt) {
+      if (this.action !== "yawn" && this.action !== "stretch") {
+        this.blinkT = 0;
+        this.blinkDur = rnd(0.10, 0.17);
+        if (this.onAction && Math.random() < 0.34) this.onAction("blink", "piscar", this.t, true);
+      }
+      this.blinkAt = this.t + rnd(tr.blinkMin, tr.blinkMax);
+    }
+
+    // --- fila exclusiva ---
+    if (this.action) {
+      this.actionT += dt;
+      if (this.actionT >= this.actionDur) {
+        this.action = null;
+        this.nextActionAt = this.t + rnd(1.1, 3.6) * tr.lag;
+      }
+    } else if (this.t >= this.nextActionAt) {
+      var pick = this.pickAction(tr);
+      if (pick) this.startAction(pick);
+      else this.nextActionAt = this.t + rnd(1.0, 2.5) * tr.lag;
+    }
+
+    // --- alvos padrão ---
+    this.posture.t = tr.drop;
+    this.lookX.t = 0; this.lookY.t = 0; this.tilt.t = 0;
+    this.armR.t = 0; this.armL.t = 0; this.mouth.t = 0; this.reach.t = 0;
+    this.pupilBoost.t = 1;
+    var stretchScale = 1, squashCmd = 1, jumpTarget = 0;
+
+    // --- comportamento da ação corrente ---
+    var p = this.action ? clamp(this.actionT / this.actionDur, 0, 1) : 0;
+    switch (this.action) {
+      case "look":
+        this.lookX.t = (p < 0.78 ? this.actionDir * 0.30 : 0);
+        this.tilt.t = (p < 0.78 ? this.actionDir * 0.9 : 0);
+        break;
+      case "lookUp":
+        this.lookY.t = (p < 0.72 ? -0.34 : 0);
+        this.posture.t = tr.drop - (p < 0.72 ? 0.18 : 0);
+        break;
+      case "tilt":
+        this.tilt.t = (p < 0.72 ? this.actionDir * 3.4 : 0);
+        break;
+      case "jump":
+        if (p < 0.13) {                              // antecipação
+          squashCmd = 1 - 0.11 * (p / 0.13);
+        } else if (p < 0.86) {                       // no ar
+          var q = (p - 0.13) / 0.73;
+          jumpTarget = Math.sin(Math.PI * q) * 3.4;
+          squashCmd = 1 + 0.15 * Math.cos(Math.PI * q); // alonga na saída e na queda
+        } else {                                     // pouso
+          var s = (p - 0.86) / 0.14;
+          squashCmd = 1 - 0.18 * Math.sin(Math.PI * s);
+        }
+        break;
+      case "stretch":
+        stretchScale = 1 + 0.14 * Math.sin(Math.PI * ease(p));
+        this.posture.t = tr.drop - 0.5 * Math.sin(Math.PI * ease(p));
+        if (this.extended) { this.armR.t = -68 * Math.sin(Math.PI * ease(p)); this.armL.t = 68 * Math.sin(Math.PI * ease(p)); }
+        break;
+      case "yawn":
+        stretchScale = 1 + 0.06 * Math.sin(Math.PI * ease(p));
+        if (this.extended) this.mouth.t = 2.6 * Math.sin(Math.PI * ease(p));
+        break;
+      case "wipe":
+        var wp = Math.sin(Math.PI * ease(p));
+        if (this.extended) {
+          this.armR.t = -118 * wp;
+          this.reach.t = wp;
+        } else {
+          // sem braço: uma sacudida seca da cabeça, que é o que resta pra
+          // comunicar "tirei o suor" usando só o corpo.
+          this.tilt.t = -7 * wp;
+          squashCmd = 1 - 0.09 * wp;
+        }
+        if (p > 0.42 && p < 0.52) this.clearSweat();
+        break;
+      case "surprise":
+        this.pupilBoost.t = p < 0.6 ? 1.35 : 1;
+        this.posture.t = tr.drop + (p < 0.25 ? 0.5 : 0);
+        break;
+      case "settle":
+        this.posture.t = tr.drop + (p < 0.6 ? this.actionDir * 0.16 : 0);
+        this.tilt.t = (p < 0.6 ? this.actionDir * 1.1 : 0);
+        break;
+    }
+
+    // --- molas ---
+    this.posture.step(dt); this.lookX.step(dt); this.lookY.step(dt);
+    this.tilt.step(dt); this.armR.step(dt); this.armL.step(dt);
+    this.mouth.step(dt); this.pupilBoost.step(dt); this.reach.step(dt);
+
+    this.jumpH += (jumpTarget - this.jumpH) * Math.min(1, dt * 26);
+    this.squashY += (squashCmd * stretchScale - this.squashY) * Math.min(1, dt * 24);
+
+    // --- tremor + falhas de movimento ---
+    var tremor = tr.tremor * (Math.sin(this.t * 37.1) * 0.6 + Math.sin(this.t * 23.7) * 0.4);
+    if (tr.tremor > 0.2 && this.glitchUntil < this.t && Math.random() < dt * 0.9) {
+      this.glitchUntil = this.t + rnd(0.06, 0.15);
+    }
+
+    // --- partículas ---
+    if (this.particles) {
+      this.sweatAcc += dt * tr.sweat;
+      while (this.sweatAcc >= 1) { this.sweatAcc -= 1; this.spawn("sweat"); }
+      this.sparkAcc += dt * tr.spark;
+      while (this.sparkAcc >= 1) { this.sparkAcc -= 1; this.spawn("spark"); }
+      if (tr.tremor > 0.2 && Math.random() < dt * 2.4) this.spawn("crack");
+      this.stepParticles(dt);
+    }
+
+    this.render({
+      breath: breath, depth: tr.depth, tremor: tremor,
+      glitch: this.glitchUntil > this.t, tr: tr
+    });
+  };
+
+  /* --------- motor atual (port fiel de mascotVisuals/motionFor) ---------- */
+
+  var V1 = {
+    rested:    { bob: 1.5, per: 2.4, shake: 0,   sweat: 0, depth: 0,     blink: 3.0, eye: "normal", tint: "#D97757" },
+    working:   { bob: 2.0, per: 1.4, shake: 0,   sweat: 0, depth: 0,     blink: 2.2, eye: "normal", tint: "#D97757" },
+    straining: { bob: 2.5, per: 0.9, shake: 0,   sweat: 1, depth: 0,     blink: 1.8, eye: "narrow", tint: "#DE824F" },
+    exhausted: { bob: 3.0, per: 0.6, shake: 0.8, sweat: 2, depth: 0.012, blink: 1.5, eye: "heavy",  tint: "#E2894A" },
+    critical:  { bob: 4.0, per: 0.42,shake: 2.0, sweat: 3, depth: 0.022, blink: 1.2, eye: "wobble", tint: "#E47560" },
+    ko:        { bob: 0,   per: 2.4, shake: 0,   sweat: 0, depth: 0,     blink: 3.0, eye: "dead",   tint: "#6A6A74" }
+  };
+
+  Clawd.prototype.updateV1 = function (dt) {
+    var st = stageFor(this.vit.v);
+    var m = V1[st.key] || V1.rested;
+
+    var bobPhase = (this.t / m.per) * Math.PI * 2;
+    var blinkPhase = (this.t % m.blink) / m.blink;
+    var shakePhase = (this.t / 0.14) * Math.PI * 2;
+    var tearPhase = (this.t % 0.9) / 0.9;
+
+    var lidFrac = { normal: 0, narrow: 0.22, heavy: 0.5, wobble: 0.3, dead: 0 }[m.eye] || 0;
+    var blinking = m.eye !== "dead" && blinkPhase >= 1 - (0.15 / m.blink);
+    if (blinking) lidFrac = 1;
+
+    var pupilW = { normal: 0.64, narrow: 0.5, heavy: 0.55, wobble: 0.42, dead: 0 }[m.eye];
+    var pupilH = { normal: 0.76, narrow: 0.5, heavy: 0.45, wobble: 0.42, dead: 0 }[m.eye];
+    var dx = m.eye === "wobble" ? 0.16 * Math.sin(shakePhase) : 0;
+
+    var scale = 1 + m.depth * Math.sin(bobPhase * 2);
+    var ty = m.bob * PX * Math.sin(bobPhase) + (m.eye === "dead" ? 6 * PX : 0);
+    var tx = m.shake * PX * Math.sin(shakePhase);
+
+    this.body.setAttribute("fill", m.tint);
+    // Mascot.kt escala e translada o desenho inteiro — reproduzido aqui de propósito.
+    this.gRoot.setAttribute("transform",
+      "translate(12,12) scale(" + scale.toFixed(4) + ") translate(-12,-12) translate(" + tx.toFixed(3) + "," + ty.toFixed(3) + ")");
+    this.gBody.removeAttribute("transform");
+    this.gShadow.setAttribute("opacity", 0);
+    this.gGlow.setAttribute("opacity", 0);
+
+    for (var i = 0; i < 2; i++) {
+      var e = this.eyes[i], s = e.socket;
+      var dead = m.eye === "dead";
+      e.x1.setAttribute("opacity", dead ? 1 : 0);
+      e.x2.setAttribute("opacity", dead ? 1 : 0);
+      var pw = s.w * pupilW, ph = s.h * pupilH;
+      e.pupil.setAttribute("x", s.x + (s.w - pw) / 2 + dx * s.w);
+      e.pupil.setAttribute("y", s.y + (s.h - ph) / 2);
+      e.pupil.setAttribute("width", dead ? 0 : pw);
+      e.pupil.setAttribute("height", dead ? 0 : ph);
+      e.lid.setAttribute("fill", m.tint);
+      e.lid.setAttribute("height", s.h * lidFrac);
+    }
+
+    // gotas em fase fixa, exatamente como drawSweat()
+    for (var j = 0; j < this.pool.length; j++) {
+      var pt = this.pool[j];
+      if (j < m.sweat) {
+        var tt = (tearPhase + j * 0.33) % 1;
+        pt.node.setAttribute("x", EYE_R.x + EYE_R.w * 1.15);
+        pt.node.setAttribute("y", EYE_R.y + EYE_R.h / 2 + tt * EYE_R.h * 1.4);
+        pt.node.setAttribute("width", EYE_R.w * 0.5);
+        pt.node.setAttribute("height", EYE_R.h * 0.55);
+        pt.node.setAttribute("fill", "#7DD3FC");
+        pt.node.setAttribute("opacity", clamp(1 - tt, 0, 1));
+      } else {
+        pt.node.setAttribute("opacity", 0);
+      }
+    }
+  };
+
+  /* --------------------------- partículas ------------------------------- */
+
+  Clawd.prototype.spawn = function (kind) {
+    for (var i = 0; i < this.pool.length; i++) {
+      var p = this.pool[i];
+      if (p.alive) continue;
+      p.alive = true; p.kind = kind; p.life = 0;
+      if (kind === "sweat") {
+        p.x = EYE_R.x + EYE_R.w * (1.1 + Math.random() * 0.9);
+        p.y = EYE_R.y + rnd(-0.6, 1.2);
+        p.vx = rnd(0.2, 0.9); p.vy = rnd(1.5, 3.0);
+        p.max = rnd(0.7, 1.1); p.size = rnd(0.55, 0.85);
+      } else if (kind === "spark") {
+        p.x = rnd(1, 23); p.y = rnd(4, 14);
+        p.vx = rnd(-0.5, 0.5); p.vy = rnd(-2.2, -1.1);
+        p.max = rnd(0.9, 1.6); p.size = rnd(0.45, 0.8);
+      } else { // crack
+        p.x = Math.random() < 0.5 ? rnd(-2.5, 0) : rnd(24, 26.5);
+        p.y = rnd(7, 16);
+        p.vx = 0; p.vy = 0;
+        p.max = rnd(0.12, 0.26); p.size = rnd(0.4, 0.7);
+      }
+      return;
+    }
+  };
+
+  Clawd.prototype.clearSweat = function () {
+    for (var i = 0; i < this.pool.length; i++) {
+      if (this.pool[i].alive && this.pool[i].kind === "sweat") this.pool[i].alive = false;
+    }
+    this.sweatAcc = 0;
+  };
+
+  Clawd.prototype.stepParticles = function (dt) {
+    for (var i = 0; i < this.pool.length; i++) {
+      var p = this.pool[i], n = p.node;
+      if (!p.alive) { n.setAttribute("opacity", 0); continue; }
+      p.life += dt;
+      if (p.life >= p.max) { p.alive = false; n.setAttribute("opacity", 0); continue; }
+      var k = p.life / p.max;
+      if (p.kind === "sweat") { p.vy += dt * 9; p.x += p.vx * dt; p.y += p.vy * dt; }
+      else if (p.kind === "spark") { p.x += p.vx * dt; p.y += p.vy * dt; }
+
+      var sz = p.size * (p.kind === "spark" ? (0.6 + 0.4 * Math.sin(k * Math.PI * 3)) : 1);
+      var op = p.kind === "crack" ? 0.5 : (p.kind === "spark" ? Math.sin(k * Math.PI) * 0.85 : clamp(1 - k, 0, 1) * 0.95);
+      n.setAttribute("x", p.x);
+      n.setAttribute("y", p.y);
+      n.setAttribute("width", p.kind === "crack" ? sz * 0.35 : sz);
+      n.setAttribute("height", p.kind === "sweat" ? sz * 1.15 : sz);
+      n.setAttribute("rx", p.kind === "crack" ? 0 : sz * 0.35);
+      n.setAttribute("fill", p.kind === "sweat" ? "#7DD3FC" : (p.kind === "spark" ? "#FBBF24" : "#F87171"));
+      n.setAttribute("opacity", op);
+    }
+  };
+
+  /* ----------------------------- render --------------------------------- */
+
+  Clawd.prototype.render = function (f) {
+    var tr = f.tr;
+
+    if (f.glitch && this.frozen) {
+      // "pequenas falhas de movimento": segura o último frame por alguns ms
+      return;
+    }
+
+    var breathScale = 1 + tr.depth * f.breath;
+    var ty = this.posture.v - this.jumpH + tr.depth * 3 * f.breath;
+    var tx = f.tremor;
+
+    this.gRoot.setAttribute("transform",
+      "translate(" + tx.toFixed(3) + "," + ty.toFixed(3) + ") " +
+      "rotate(" + this.tilt.v.toFixed(2) + ",12," + FOOT_Y + ")");
+
+    var sy = this.squashY * breathScale;
+    var sx = 1 / Math.sqrt(sy);   // preserva volume
+    this.gBody.setAttribute("transform",
+      "translate(12," + FOOT_Y + ") scale(" + sx.toFixed(4) + "," + sy.toFixed(4) + ") translate(-12,-" + FOOT_Y + ")");
+
+    this.body.setAttribute("fill", tr.css);
+
+    // sombra derivada da altura do salto e da respiração
+    if (this.showShadow) {
+      var air = clamp(this.jumpH / 3.4, 0, 1);
+      var sr = 8.4 * (1 - 0.42 * air) * (1 + 0.02 * f.breath);
+      this.gShadow.setAttribute("rx", sr.toFixed(3));
+      this.gShadow.setAttribute("ry", (1.5 * (1 - 0.35 * air)).toFixed(3));
+      this.gShadow.setAttribute("cx", (12 + tx * 0.6).toFixed(3));
+      this.gShadow.setAttribute("cy", (FOOT_Y + 1.1 + this.posture.v).toFixed(3));
+      this.gShadow.setAttribute("opacity", (0.34 * (1 - 0.5 * air)).toFixed(3));
+    }
+
+    this.gGlow.setAttribute("opacity", (tr.glow * (0.72 + 0.28 * f.breath)).toFixed(3));
+    this.gGlow.setAttribute("cy", (12 + ty).toFixed(2));
+
+    // olhos
+    var blink = this.blinkT >= 0 ? Math.sin(Math.PI * (this.blinkT / this.blinkDur)) : 0;
+    var yawnClose = this.action === "yawn" ? Math.sin(Math.PI * ease(clamp(this.actionT / this.actionDur, 0, 1))) : 0;
+    var stretchClose = this.action === "stretch" ? Math.sin(Math.PI * ease(clamp(this.actionT / this.actionDur, 0, 1))) * 0.8 : 0;
+    var baseLid = 1 - tr.open;
+    var lidFrac = clamp(Math.max(baseLid, blink, yawnClose, stretchClose), 0, 1);
+    var pscale = tr.pupil * this.pupilBoost.v;
+
+    for (var i = 0; i < 2; i++) {
+      var e = this.eyes[i], s = e.socket;
+      var pw = s.w * 0.64 * pscale, ph = s.h * 0.76 * pscale;
+      e.pupil.setAttribute("x", (s.x + (s.w - pw) / 2 + this.lookX.v * s.w).toFixed(3));
+      e.pupil.setAttribute("y", (s.y + (s.h - ph) / 2 + this.lookY.v * s.h).toFixed(3));
+      e.pupil.setAttribute("width", pw.toFixed(3));
+      e.pupil.setAttribute("height", ph.toFixed(3));
+      e.lid.setAttribute("fill", tr.css);
+      e.lid.setAttribute("height", (s.h * lidFrac).toFixed(3));
+    }
+
+    if (this.extended) {
+      this.armLNode.setAttribute("fill", tr.css);
+      this.armRNode.setAttribute("fill", tr.css);
+      this.armLNode.setAttribute("transform", "rotate(" + this.armL.v.toFixed(2) + "," + ARM_L.px + "," + ARM_L.py + ")");
+      var rc = this.reach.v;
+      this.armRNode.setAttribute("transform",
+        "translate(" + (-3.6 * rc).toFixed(3) + "," + (-2.0 * rc).toFixed(3) + ") " +
+        "rotate(" + this.armR.v.toFixed(2) + "," + ARM_R.px + "," + ARM_R.py + ")");
+      var mh = Math.max(0, this.mouth.v);
+      // boca só existe durante o bocejo; abaixo de 20 de vitalidade vira um traço triste
+      if (mh < 0.05 && this.vit.v < 20) { mh = 0.55; }
+      this.mouthNode.setAttribute("height", mh.toFixed(3));
+      this.mouthNode.setAttribute("y", (13.0 + (2.6 - mh) * 0.18).toFixed(3));
+      this.mouthNode.setAttribute("opacity", mh > 0.02 ? 1 : 0);
+    }
+
+    this.frozen = true;
+  };
+
+  Clawd.prototype.setLayers = function (on) {
+    var st = on ? "1px" : "0";
+    this.gBody.style.outline = on ? "0.15px dashed rgba(125,211,252,0.55)" : "";
+    this.gPart.style.outline = on ? "0.15px dashed rgba(251,191,36,0.4)" : "";
+    this.gShadow.style.outline = on ? "0.15px dashed rgba(140,140,152,0.5)" : "";
+    void st;
+  };
+
+  /* =========================================================================
+     CENA DE DESCANSO — geometria 1:1 de GraveScene.kt
+     ========================================================================= */
+
+  function Grave(host, opts) {
+    opts = opts || {};
+    this.spirits = !!opts.spirits;
+    this.t = Math.random() * 3.2;
+    this.visible = true;
+
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 40 34");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Lápide e fantasma de Clawd");
+    svg.innerHTML =
+      '<ellipse cx="20" cy="31.5" rx="15" ry="3" fill="#000" opacity="0.32"/>' +
+      '<g class="spirits"></g>' +
+      '<g class="ghost">' +
+      '<path d="M9,20 Q9,8 19,8 Q29,8 29,20 L29,29 Q27,32.5 25,29 Q23,32.5 21,29 Q19,32.5 17,29 Q15,32.5 13,29 Q11,32.5 9,29 Z" fill="#D97757"/>' +
+      '<rect x="14.4" y="17" width="2.2" height="3" rx="0.9" fill="rgba(0,0,0,0.55)"/>' +
+      '<rect x="20.4" y="17" width="2.2" height="3" rx="0.9" fill="rgba(0,0,0,0.55)"/>' +
+      '</g>' +
+      '<path d="M10,17 A6,6 0 0 1 16,11 L24,11 A6,6 0 0 1 30,17 L30,30 L10,30 Z" fill="#6A6A74"/>' +
+      '<path d="M14.5,23 L18,28.5 L16.2,30" fill="none" stroke="rgba(0,0,0,0.28)" stroke-width="0.6" stroke-linecap="round"/>' +
+      '<text x="20" y="24.5" text-anchor="middle" font-family="monospace" font-weight="700" font-size="6" letter-spacing="0.5" fill="rgba(0,0,0,0.34)">RIP</text>';
+
+    host.innerHTML = "";
+    host.appendChild(svg);
+    this.svg = svg;
+    this.ghost = svg.querySelector(".ghost");
+    this.gSpirits = svg.querySelector(".spirits");
+
+    this.pool = [];
+    if (this.spirits) {
+      for (var i = 0; i < 7; i++) {
+        var c = document.createElementNS(ns, "circle");
+        c.setAttribute("r", 1.6);
+        c.setAttribute("fill", "url(#clawd-spirit)");
+        c.setAttribute("opacity", 0);
+        this.gSpirits.appendChild(c);
+        this.pool.push({ node: c, alive: false, x: 0, y: 0, vy: 0, drift: 0, life: 0, max: 1 });
+      }
+    }
+    this.acc = 0;
+
+    var self = this;
+    if (typeof IntersectionObserver !== "undefined") {
+      var io = new IntersectionObserver(function (e) { self.visible = e[0].isIntersecting; }, { rootMargin: "120px" });
+      io.observe(host);
+    }
+    ALL.push(this);
+  }
+
+  Grave.prototype.update = function (dt) {
+    this.t += dt;
+    // sin(fase/2) traça a mesma corcova do keyframe ghost-float (3,2 s)
+    var phase = (this.t % 3.2) / 3.2 * Math.PI * 2;
+    var rise = Math.sin(phase / 2);
+    this.ghost.setAttribute("transform", "translate(0," + (-rise * 24.5 * 0.14).toFixed(3) + ")");
+    this.ghost.setAttribute("opacity", (0.6 * (0.85 + 0.15 * rise)).toFixed(3));
+
+    if (!this.spirits) return;
+    this.acc += dt * 1.5;
+    while (this.acc >= 1) {
+      this.acc -= 1;
+      for (var i = 0; i < this.pool.length; i++) {
+        var p = this.pool[i];
+        if (p.alive) continue;
+        p.alive = true; p.life = 0; p.max = rnd(1.8, 3.2);
+        p.x = rnd(12, 28); p.y = rnd(24, 30);
+        p.vy = rnd(-3.4, -1.8); p.drift = rnd(-1.2, 1.2);
+        break;
+      }
+    }
+    for (var j = 0; j < this.pool.length; j++) {
+      var q = this.pool[j];
+      if (!q.alive) { q.node.setAttribute("opacity", 0); continue; }
+      q.life += dt;
+      if (q.life >= q.max) { q.alive = false; q.node.setAttribute("opacity", 0); continue; }
+      var k = q.life / q.max;
+      q.y += q.vy * dt;
+      q.node.setAttribute("cx", (q.x + Math.sin(k * 6 + j) * q.drift).toFixed(2));
+      q.node.setAttribute("cy", q.y.toFixed(2));
+      q.node.setAttribute("r", (1.9 * (0.5 + 0.5 * Math.sin(k * Math.PI))).toFixed(2));
+      q.node.setAttribute("opacity", (Math.sin(k * Math.PI) * 0.9).toFixed(3));
+    }
+  };
+
+  /* =========================================================================
+     RELÓGIO ÚNICO
+     ========================================================================= */
+
+  var ALL = [];
+  var paused = false, slow = false;
+  var last = 0, fpsAcc = 0, fpsN = 0, fpsEl = null;
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!last) { last = now; return; }
+    var raw = (now - last) / 1000;
+    last = now;
+    if (raw > 0.12) raw = 0.12;   // aba em segundo plano / engasgo
+
+    fpsAcc += raw; fpsN++;
+    if (fpsAcc >= 0.5) {
+      if (fpsEl) fpsEl.textContent = Math.round(fpsN / fpsAcc) + " fps";
+      fpsAcc = 0; fpsN = 0;
+    }
+
+    if (paused) return;
+    var dt = raw * (slow ? 0.25 : 1);
+    for (var i = 0; i < ALL.length; i++) {
+      var c = ALL[i];
+      if (c.visible === false) continue;   // simula a pausa por visibilidade
+      c.update(dt);
+    }
+  }
+  requestAnimationFrame(frame);
+
+  /* =========================================================================
+     MONTAGEM DA PÁGINA
+     ========================================================================= */
+
+  fpsEl = document.getElementById("fps");
+
+  var instances = [];   // instâncias V3 que seguem o slider
+  var v1s = [];
+
+  function mk(host, opts) {
+    var c = new Clawd(host, opts);
+    instances.push(c);
+    return c;
+  }
+
+  /* ---- 1. hero ---- */
+  var logRows = [], lastActionT = 0, histo = {};
+  var hero = new Clawd(document.getElementById("hero-slot"), {
+    vitality: 100,
+    onAction: function (key, label, t, reflex) { pushLog(key, label, t, reflex); }
+  });
+  instances.push(hero);
+
+  var roVit = document.getElementById("ro-vit");
+  var roStage = document.getElementById("ro-stage");
+  var roUsage = document.getElementById("ro-usage");
+  var slider = document.getElementById("vit");
+
+  /* ---- 2. anatomia ---- */
+  var anatPure = mk(document.getElementById("anat-pure"), { vitality: 45, extended: false });
+  var anatExt = mk(document.getElementById("anat-ext"), { vitality: 45, extended: true });
+
+  /* ---- 3. atual x v3 ---- */
+  var cmpV1 = new Clawd(document.getElementById("cmp-v1"), { engine: "v1", vitality: 100, shadow: false });
+  v1s.push(cmpV1);
+  var cmpV3 = mk(document.getElementById("cmp-v3"), { vitality: 100 });
+
+  /* ---- 4. galeria ---- */
+  var galleryHost = document.getElementById("gallery");
+  // um representante no meio de cada faixa de stageFor()
+  GALLERY.forEach(function (g) {
+    var st = stageFor(g.v);
+    var card = document.createElement("div");
+    card.className = "gal-card";
+    card.innerHTML =
+      '<div class="slot"></div>' +
+      '<div class="gal-dot-row"><span class="gal-dot" style="--dot:' + st.color + '"></span>' +
+      '<span class="gal-name">' + st.label + '</span></div>' +
+      '<div class="gal-sub">' + (100 - g.v) + '% de uso · ' + st.nice + '</div>';
+    galleryHost.appendChild(card);
+    var slot = card.querySelector(".slot");
+    if (g.v <= 0.5) new Grave(slot, { spirits: true });
+    else mk(slot, { vitality: g.v });
+  });
+
+  /* ---- 5. log ---- */
+  var logEl = document.getElementById("log");
+  var histoEl = document.getElementById("histo");
+
+  function fmtClock(t) {
+    var s = Math.floor(t) % 60, m = Math.floor(t / 60);
+    return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function pushLog(key, label, t, reflex) {
+    var empty = document.getElementById("log-empty");
+    if (empty) empty.parentNode.removeChild(empty);
+
+    var delta = t - lastActionT;
+    if (!reflex) lastActionT = t;
+
+    var row = document.createElement("div");
+    row.className = "log-row" + (reflex ? " reflex" : "");
+    row.innerHTML =
+      '<span class="t">' + fmtClock(t) + '</span>' +
+      '<span class="a">' + label + '</span>' +
+      '<span class="d">+' + delta.toFixed(1) + 's</span>';
+    logEl.insertBefore(row, logEl.firstChild);
+    logRows.push(row);
+    while (logRows.length > 40) { var old = logRows.shift(); if (old.parentNode) old.parentNode.removeChild(old); }
+
+    if (!reflex) {
+      histo[key] = (histo[key] || 0) + 1;
+      renderHisto();
+    }
+  }
+
+  var histoNodes = {};
+  function renderHisto() {
+    var max = 1;
+    for (var k in histo) if (histo[k] > max) max = histo[k];
+    ACTION_KEYS.forEach(function (key) {
+      if (!histoNodes[key]) {
+        var row = document.createElement("div");
+        row.className = "histo-row";
+        row.innerHTML = '<span class="nm">' + HISTO_NAMES[key] + '</span>' +
+          '<span class="bar"><i style="width:0%"></i></span><span class="n">0</span>';
+        histoEl.appendChild(row);
+        histoNodes[key] = { bar: row.querySelector("i"), n: row.querySelector(".n") };
+      }
+      var c = histo[key] || 0;
+      histoNodes[key].bar.style.width = (c / max * 100) + "%";
+      histoNodes[key].n.textContent = c;
+    });
+  }
+  renderHisto();
+
+  /* ---- 6. tamanhos ---- */
+  var sizesHost = document.getElementById("sizes");
+  [
+    { dp: 42,  where: "StickHeader" },
+    { dp: 56,  where: "TileAgora" },
+    { dp: 88,  where: "login" },
+    { dp: 96,  where: "TileClawd" },
+    { dp: 176, where: "MomentOverlay" }
+  ].forEach(function (s) {
+    var item = document.createElement("div");
+    item.className = "size-item";
+    // a caixa tracejada é a de hoje (24x15 unidades -> dp x dp*0,625)
+    item.innerHTML =
+      '<div class="size-box" style="width:' + s.dp + 'px;height:' + (s.dp * 0.625) + 'px">' +
+      '<div class="slot" style="width:' + (s.dp * BOX.w / 24) + 'px"></div></div>' +
+      '<div class="size-tag">' + s.dp + ' dp</div>' +
+      '<div class="size-where">' + s.where + '</div>';
+    sizesHost.appendChild(item);
+    mk(item.querySelector(".slot"), { vitality: 100 });
+  });
+
+  /* ---- 7. descanso ---- */
+  new Grave(document.getElementById("grave-now"), { spirits: false });
+  new Grave(document.getElementById("grave-new"), { spirits: true });
+
+  /* =========================================================================
+     CONTROLES
+     ========================================================================= */
+
+  function applyVitality(v) {
+    hero.setVitality(v);
+    cmpV1.setVitality(v);
+    cmpV3.setVitality(v);
+    var st = stageFor(v);
+    roVit.textContent = Math.round(v) + "%";
+    roVit.style.color = st.color;
+    roStage.textContent = st.label + " · " + st.nice;
+    roStage.style.color = st.color;
+    roUsage.textContent = "uso da janela: " + Math.round(100 - v) + "%";
+
+    var m = V1[st.key] || V1.rested;
+    document.getElementById("cmp-v1-cap").textContent =
+      "bob " + m.bob + "px / " + m.per + "s fixo · piscada a cada " + m.blink + "s";
+    document.getElementById("cmp-v3-cap").textContent =
+      "respiração " + traitsFor(v).breath.toFixed(1) + "s · próxima ação sorteada";
+  }
+
+  slider.addEventListener("input", function () { applyVitality(parseFloat(slider.value)); });
+  applyVitality(100);
+
+  document.querySelectorAll("[data-vit]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var v = parseFloat(b.getAttribute("data-vit"));
+      slider.value = v;
+      applyVitality(v);
+    });
+  });
+
+  document.querySelectorAll("[data-force]").forEach(function (b) {
+    b.addEventListener("click", function () { hero.force(b.getAttribute("data-force")); });
+  });
+
+  document.querySelectorAll("[data-force2]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var k = b.getAttribute("data-force2");
+      anatPure.force(k);
+      anatExt.force(k);
+    });
+  });
+
+  var btnPause = document.getElementById("btn-pause");
+  btnPause.addEventListener("click", function () {
+    paused = !paused;
+    btnPause.setAttribute("aria-pressed", String(paused));
+    btnPause.textContent = paused ? "retomar" : "pausar";
+  });
+
+  var btnSlow = document.getElementById("btn-slow");
+  btnSlow.addEventListener("click", function () {
+    slow = !slow;
+    btnSlow.setAttribute("aria-pressed", String(slow));
+  });
+
+  var btnLayers = document.getElementById("btn-layers");
+  var layersOn = false;
+  btnLayers.addEventListener("click", function () {
+    layersOn = !layersOn;
+    btnLayers.setAttribute("aria-pressed", String(layersOn));
+    ALL.forEach(function (c) { if (c.setLayers) c.setLayers(layersOn); });
+  });
+
+  // "anatomia estendida" global: reconstrói as instâncias que não são o par da seção 2
+  var btnAnat = document.getElementById("btn-anat");
+  var anatOn = false;
+  btnAnat.addEventListener("click", function () {
+    anatOn = !anatOn;
+    btnAnat.setAttribute("aria-pressed", String(anatOn));
+    instances.forEach(function (c) {
+      if (c === anatPure || c === anatExt) return;
+      if (c.extended === anatOn) return;
+      c.extended = anatOn;
+      var vit = c.vit.t;
+      c.build();
+      c.setVitality(vit);
+      if (layersOn) c.setLayers(true);
+    });
+  });
+
+})();
+</script>
+</body>
+</html>

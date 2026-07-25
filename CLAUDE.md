@@ -39,3 +39,9 @@ Anthropic's bot detection blocks the `/usage` endpoint for HTTP clients whose TL
 ## Knowledge graph (Graphify)
 
 `graphify-out/` holds a generated knowledge graph of this codebase (`graph.html` for interactive browsing, `GRAPH_REPORT.md` for the plain-language audit). Regenerate after large refactors with `/graphify --update`.
+
+## Espelhamento (app ↔ desktop)
+
+There is a third sibling implementation: **`C:\git\Claude-Counter-Desktop`** (Electron/TypeScript), a floating always-on-top widget for Windows — same idea as the Spotify mini-player, built to mirror this app's tracking behavior and visual system.
+
+The shared contract (endpoint shape, parse rules, threshold/revival rules, adaptive polling cadence, the "Stick" color tokens) lives in **`Claude-Counter-Desktop/SPEC.md`**, not duplicated here. **Any change to tracking behavior, thresholds, cadence, or visual tokens made in this Android app must update that `SPEC.md` and be reflected in the desktop project in the same round of work** — and vice versa. Treat drift between the two as a bug, not a stylistic difference.

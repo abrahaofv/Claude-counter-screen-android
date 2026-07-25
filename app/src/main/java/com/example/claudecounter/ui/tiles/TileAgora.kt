@@ -59,7 +59,7 @@ fun TileAgora(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 8.dp)
-            .padding(top = 4.dp, bottom = 28.dp)
+            .padding(top = 4.dp, bottom = 8.dp)
     ) {
         if (stacked) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -135,7 +135,7 @@ private fun UsageCardStick(
                 color = usageColor(animatedPct),
             )
             if (stage != null) {
-                Mascot(width = 56.dp, mood = MascotMood.Ok, stage = stage)
+                Mascot(width = 56.dp, mood = MascotMood.Ok, stage = stage, pct = pct)
             }
         }
 

@@ -68,6 +68,7 @@ fun MonitorRoot(
     }
 
     var showSettings by remember { mutableStateOf(false) }
+    var showMascotGallery by remember { mutableStateOf(false) }
 
     val historySamples = remember(usageState.lastFetchTime) { historyRepo.samples }
 
@@ -110,22 +111,27 @@ fun MonitorRoot(
     val sessionReviving = now < sessionRevivalUntil
     val weeklyReviving = now < weeklyRevivalUntil
 
-    val sessionStage = if (displayConfig.showMascots) {
+    val sessionStage = if (displayConfig.showMascots && displayConfig.showAgoraMascots) {
         if (sessionReviving) MascotStage.REVIVING else stageFor(sessionPct)
     } else null
-    val weeklyStage = if (displayConfig.showMascots) {
+    val weeklyStage = if (displayConfig.showMascots && displayConfig.showAgoraMascots) {
         if (weeklyReviving) MascotStage.REVIVING else stageFor(weeklyPct)
     } else null
     val headerStage = if (displayConfig.showMascots) {
         if (sessionReviving || weeklyReviving) MascotStage.REVIVING else stageFor(maxOf(sessionPct, weeklyPct))
     } else null
 
-    val pages = remember(displayConfig.showMascots) {
-        if (displayConfig.showMascots) {
+    val pages = remember(displayConfig.showMascots, displayConfig.showClawdTab) {
+        if (displayConfig.showMascots && displayConfig.showClawdTab) {
             listOf(MonitorPage.AGORA, MonitorPage.CLAWD, MonitorPage.TREND, MonitorPage.HEAT)
         } else {
             listOf(MonitorPage.AGORA, MonitorPage.TREND, MonitorPage.HEAT)
         }
+    }
+    // Falls back to Agora (index 0) when Clawd isn't in pages — e.g. its tab is
+    // off, so "open on Clawd" has nothing to point at.
+    val initialPage = remember(pages, displayConfig.openClawdFirst) {
+        if (displayConfig.openClawdFirst) pages.indexOf(MonitorPage.CLAWD).coerceAtLeast(0) else 0
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -137,6 +143,7 @@ fun MonitorRoot(
                     historySamples = historySamples,
                     stackedAgora = true,
                     pages = pages,
+                    initialPage = initialPage,
                     headerStage = headerStage, sessionStage = sessionStage, weeklyStage = weeklyStage,
                     sessionReviving = sessionReviving, weeklyReviving = weeklyReviving,
                 )
@@ -148,6 +155,7 @@ fun MonitorRoot(
                     historySamples = historySamples,
                     stackedAgora = false,
                     pages = pages,
+                    initialPage = initialPage,
                     headerStage = headerStage, sessionStage = sessionStage, weeklyStage = weeklyStage,
                     sessionReviving = sessionReviving, weeklyReviving = weeklyReviving,
                 )
@@ -163,6 +171,10 @@ fun MonitorRoot(
                 isApiBlocked = usageState.isApiBlocked,
                 displayConfig = displayConfig,
                 onShowMascotsChange = displaySettings::setShowMascots,
+                onShowAgoraMascotsChange = displaySettings::setShowAgoraMascots,
+                onShowClawdTabChange = displaySettings::setShowClawdTab,
+                onOpenClawdFirstChange = displaySettings::setOpenClawdFirst,
+                onOpenMascotGallery = { showMascotGallery = true },
                 pollingConfig = pollingConfig,
                 pollMode = usageState.pollMode,
                 onAdaptiveChange = pollingSettings::setAdaptiveEnabled,
@@ -174,6 +186,10 @@ fun MonitorRoot(
                 },
                 onClose = { showSettings = false },
             )
+        }
+
+        if (showMascotGallery) {
+            MascotGalleryScreen(onClose = { showMascotGallery = false })
         }
     }
 }
@@ -189,6 +205,7 @@ private fun MonitorContent(
     historySamples: List<com.example.claudecounter.data.UsageSample>,
     stackedAgora: Boolean,
     pages: List<MonitorPage>,
+    initialPage: Int,
     headerStage: MascotStage?,
     sessionStage: MascotStage?,
     weeklyStage: MascotStage?,
@@ -210,6 +227,7 @@ private fun MonitorContent(
         key(pages.size) {
             MonitorPager(
                 pageCount = pages.size,
+                initialPage = initialPage,
                 modifier = Modifier.weight(1f).fillMaxWidth()
             ) { index ->
                 when (pages[index]) {
@@ -232,6 +250,7 @@ private fun MonitorContent(
                         weeklyResetsAtMs = usageState.weeklyResetsAt,
                         weeklyReviving = weeklyReviving,
                         now = now,
+                        isApiBlocked = usageState.isApiBlocked,
                         stacked = stackedAgora,
                     )
                     MonitorPage.TREND -> TileTrend(

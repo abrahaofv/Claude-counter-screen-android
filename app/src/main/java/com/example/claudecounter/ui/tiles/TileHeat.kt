@@ -63,7 +63,7 @@ fun TileHeat(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp)
-            .padding(top = 4.dp, bottom = 28.dp)
+            .padding(top = 4.dp, bottom = 8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

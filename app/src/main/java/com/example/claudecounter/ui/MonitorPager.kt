@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,7 +16,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -31,13 +31,14 @@ import com.example.claudecounter.ui.theme.StickDimens
 fun MonitorPager(
     pageCount: Int,
     modifier: Modifier = Modifier,
-    pagerState: PagerState = rememberPagerState(pageCount = { pageCount }),
+    initialPage: Int = 0,
+    pagerState: PagerState = rememberPagerState(initialPage = initialPage, pageCount = { pageCount }),
     page: @Composable (index: Int) -> Unit,
 ) {
-    Box(modifier = modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.weight(1f).fillMaxWidth()
         ) { index ->
             page(index)
         }
@@ -45,8 +46,8 @@ fun MonitorPager(
             count = pageCount,
             activeIndex = pagerState.currentPage,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 4.dp)
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
         )
     }
 }

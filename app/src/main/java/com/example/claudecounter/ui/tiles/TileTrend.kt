@@ -97,7 +97,7 @@ fun TileTrend(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp)
-            .padding(top = 2.dp, bottom = 28.dp)
+            .padding(top = 2.dp, bottom = 8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

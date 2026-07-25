@@ -42,6 +42,10 @@ fun SettingsScreen(
     isApiBlocked: Boolean,
     displayConfig: DisplayConfig,
     onShowMascotsChange: (Boolean) -> Unit,
+    onShowAgoraMascotsChange: (Boolean) -> Unit,
+    onShowClawdTabChange: (Boolean) -> Unit,
+    onOpenClawdFirstChange: (Boolean) -> Unit,
+    onOpenMascotGallery: () -> Unit,
     pollingConfig: PollingConfig,
     pollMode: PollMode,
     onAdaptiveChange: (Boolean) -> Unit,
@@ -76,7 +80,16 @@ fun SettingsScreen(
         AppearanceSection(
             config = displayConfig,
             onShowMascotsChange = onShowMascotsChange,
+            onShowAgoraMascotsChange = onShowAgoraMascotsChange,
+            onShowClawdTabChange = onShowClawdTabChange,
+            onOpenClawdFirstChange = onOpenClawdFirstChange,
         )
+
+        Row(modifier = Modifier.padding(top = 12.dp)) {
+            OutlinedButton(onClick = onOpenMascotGallery) {
+                Text("Ver animacoes do Clawd", color = StickColors.Accent)
+            }
+        }
 
         MonitoringSection(
             config = pollingConfig,
@@ -105,6 +118,9 @@ fun SettingsScreen(
 private fun AppearanceSection(
     config: DisplayConfig,
     onShowMascotsChange: (Boolean) -> Unit,
+    onShowAgoraMascotsChange: (Boolean) -> Unit,
+    onShowClawdTabChange: (Boolean) -> Unit,
+    onOpenClawdFirstChange: (Boolean) -> Unit,
 ) {
     Column(modifier = Modifier.padding(top = 8.dp)) {
         Text("Aparencia", style = StickType.heading, color = StickColors.Text)
@@ -127,6 +143,87 @@ private fun AppearanceSection(
             Switch(
                 checked = config.showMascots,
                 onCheckedChange = onShowMascotsChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = StickColors.Bg,
+                    checkedTrackColor = StickColors.Accent,
+                    uncheckedThumbColor = StickColors.Muted,
+                    uncheckedTrackColor = StickColors.Surface2,
+                )
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Mascotes na Agora", style = StickType.label, color = StickColors.Text)
+                Text(
+                    "Mostra o Clawd reagindo em cada card (5h e semana) na tela Agora",
+                    style = StickType.caption,
+                    color = StickColors.Muted
+                )
+            }
+            Switch(
+                checked = config.showAgoraMascots,
+                onCheckedChange = onShowAgoraMascotsChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = StickColors.Bg,
+                    checkedTrackColor = StickColors.Accent,
+                    uncheckedThumbColor = StickColors.Muted,
+                    uncheckedTrackColor = StickColors.Surface2,
+                )
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Aba dedicada do Clawd", style = StickType.label, color = StickColors.Text)
+                Text(
+                    "Tela grande so do Clawd, separada da Agora — desligada por padrao, ja fica parecido com a primeira tela",
+                    style = StickType.caption,
+                    color = StickColors.Muted
+                )
+            }
+            Switch(
+                checked = config.showClawdTab,
+                onCheckedChange = onShowClawdTabChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = StickColors.Bg,
+                    checkedTrackColor = StickColors.Accent,
+                    uncheckedThumbColor = StickColors.Muted,
+                    uncheckedTrackColor = StickColors.Surface2,
+                )
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Tela inicial: Clawd", style = StickType.label, color = StickColors.Text)
+                Text(
+                    "Abre direto na aba do Clawd em vez da Agora — so vale se a aba dedicada acima estiver ligada",
+                    style = StickType.caption,
+                    color = StickColors.Muted
+                )
+            }
+            Switch(
+                checked = config.openClawdFirst,
+                onCheckedChange = onOpenClawdFirstChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = StickColors.Bg,
                     checkedTrackColor = StickColors.Accent,

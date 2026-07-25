@@ -1,10 +1,6 @@
 package com.example.claudecounter.ui.tiles
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,35 +14,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.claudecounter.data.SurvivalStatsRepository
+import com.example.claudecounter.ui.SegmentMeter
+import com.example.claudecounter.ui.StatusChip
 import com.example.claudecounter.ui.brand.GraveScene
 import com.example.claudecounter.ui.brand.Mascot
 import com.example.claudecounter.ui.brand.MascotMood
 import com.example.claudecounter.ui.brand.MascotStage
 import com.example.claudecounter.ui.brand.stageFor
+import com.example.claudecounter.ui.pctColorDiscrete
 import com.example.claudecounter.ui.theme.StickColors
 import com.example.claudecounter.ui.theme.StickDimens
 import com.example.claudecounter.ui.theme.StickType
 import com.example.claudecounter.ui.usageColor
 import com.example.claudecounter.util.formatCountdown
-import com.example.claudecounter.util.formatSurvivalDuration
 
 /**
  * Tile "Clawd" — the tamagotchi view: one large mascot per usage window, sized
@@ -54,6 +38,11 @@ import com.example.claudecounter.util.formatSurvivalDuration
  * [MascotStage] driving the mini mascots on the Agora cards and the header, just
  * given room to actually be seen (the overlay in [com.example.claudecounter.ui.MomentOverlay]
  * only shows for a few seconds).
+ *
+ * Sized to fit landscape's fixed 320dp-tall "monitor mode" canvas
+ * ([StickDimens.CanvasHeight]) without scrolling — no title row (matches
+ * [TileAgora]'s chrome-less style) and a compact [ClawdCard], same budget math
+ * as [TileAgora]. `verticalScroll` stays on as a safety net, not the plan.
  */
 @Composable
 fun TileClawd(
@@ -64,6 +53,7 @@ fun TileClawd(
     weeklyResetsAtMs: Long,
     weeklyReviving: Boolean,
     now: Long,
+    isApiBlocked: Boolean,
     modifier: Modifier = Modifier,
     /** Portrait mode stacks the two cards vertically instead of side by side. */
     stacked: Boolean = false,
@@ -73,19 +63,8 @@ fun TileClawd(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 8.dp)
-            .padding(top = 4.dp, bottom = 28.dp)
+            .padding(top = 4.dp, bottom = 8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Clawd", style = StickType.heading, color = StickColors.Text)
-            Text("como ele esta", style = StickType.caption, color = StickColors.Faint)
-        }
-
-        Spacer(Modifier.height(6.dp))
-
         if (stacked) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ClawdCard("JANELA 5H", sessionPct, sessionResetsAtMs, sessionReviving, now, Modifier.fillMaxWidth())
@@ -101,61 +80,28 @@ fun TileClawd(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
-
-        SurvivalBanner(now = now, modifier = Modifier.fillMaxWidth())
-    }
-}
-
-/**
- * "CLAWD VIVO HA Xd Yh · RECORDE Zd" — how long since either window last hit
- * 100%, with the all-time best alongside. Backed by [SurvivalStatsRepository];
- * ticks off [now], which the caller already refreshes once a second, so this
- * needs no timer of its own.
- */
-@Composable
-private fun SurvivalBanner(now: Long, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val repo = remember { SurvivalStatsRepository.getInstance(context) }
-    val survival by repo.state.collectAsStateWithLifecycle()
-
-    // Flashes the border when a new record lands — mirrors the preview's
-    // record-flash box-shadow pulse.
-    val flash = remember { Animatable(0f) }
-    var lastSeenRecord by remember { mutableLongStateOf(survival.recordMs) }
-    LaunchedEffect(survival.recordMs) {
-        if (survival.recordMs > lastSeenRecord) {
-            flash.snapTo(1f)
-            flash.animateTo(0f, tween(900, easing = LinearOutSlowInEasing))
+        // Same overall-status chip as TileAgora — "OK" / "ATENCAO" / "BLOQUEADO".
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            val overallPct = maxOf(sessionPct, weeklyPct)
+            val (label, color) = when {
+                isApiBlocked -> "BLOQUEADO" to StickColors.Bad
+                else -> {
+                    val c = pctColorDiscrete(overallPct)
+                    val l = when (c) {
+                        StickColors.Ok -> "OK"
+                        StickColors.Warn -> "ATENCAO"
+                        else -> "BLOQUEADO"
+                    }
+                    l to c
+                }
+            }
+            StatusChip(text = label, color = color)
         }
-        lastSeenRecord = survival.recordMs
-    }
-
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(StickDimens.ChipRadius))
-            .background(StickColors.Surface)
-            .border(
-                width = 1.dp,
-                color = lerp(StickColors.Border, StickColors.Accent, flash.value),
-                shape = RoundedCornerShape(StickDimens.ChipRadius)
-            )
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            text = buildAnnotatedString {
-                withStyle(SpanStyle(color = StickColors.Muted)) { append("CLAWD VIVO HA ") }
-                withStyle(SpanStyle(color = StickColors.Text, fontWeight = FontWeight.Bold)) {
-                    append(formatSurvivalDuration(now - survival.aliveSinceMs))
-                }
-                withStyle(SpanStyle(color = StickColors.Muted)) { append(" · RECORDE ") }
-                withStyle(SpanStyle(color = StickColors.Accent)) {
-                    append(formatSurvivalDuration(survival.recordMs))
-                }
-            },
-            style = StickType.caption.copy(fontFamily = FontFamily.Monospace),
-        )
     }
 }
 
@@ -173,7 +119,7 @@ private fun ClawdCard(
 
     Column(
         modifier = modifier
-            .height(210.dp)
+            .height(196.dp)
             .clip(RoundedCornerShape(StickDimens.CardRadius))
             .background(StickColors.Surface)
             .padding(StickDimens.CardPadding),
@@ -181,15 +127,15 @@ private fun ClawdCard(
     ) {
         Text(text = title, style = StickType.label, color = StickColors.Muted, modifier = Modifier.fillMaxWidth())
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
 
         if (isGrave) {
-            GraveScene(width = 96.dp)
+            GraveScene(width = 88.dp)
         } else {
-            Mascot(width = 96.dp, mood = MascotMood.Ok, stage = stage)
+            Mascot(width = 88.dp, mood = MascotMood.Ok, stage = stage, pct = pct)
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         Text(
             // "Descansando" instead of stage.label's "Morto" once the grave scene
@@ -199,12 +145,15 @@ private fun ClawdCard(
             color = if (isGrave) StickColors.MascotKo else usageColor(pct),
         )
 
+        SegmentMeter(pct = pct, modifier = Modifier.padding(top = 6.dp))
+
         if (resetsAtMs > 0L) {
+            val diffMs = resetsAtMs - now
             Text(
-                text = if (resetsAtMs > now) "reseta em ${formatCountdown(resetsAtMs - now)}" else "reseta ja",
-                style = StickType.caption,
-                color = StickColors.Faint,
-                modifier = Modifier.padding(top = 4.dp)
+                text = if (diffMs > 0) formatCountdown(diffMs) else "ja",
+                style = StickType.displayCountdown,
+                color = StickColors.Text,
+                modifier = Modifier.padding(top = 2.dp)
             )
         }
     }

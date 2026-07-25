@@ -133,6 +133,7 @@ fun MomentOverlay(
                     width = 176.dp,
                     mood = MascotMood.Ok,
                     stage = stage,
+                    pct = event.pct,
                     modifier = Modifier.offset(x = shakeOffsetX, y = fallOffsetY)
                 )
             }

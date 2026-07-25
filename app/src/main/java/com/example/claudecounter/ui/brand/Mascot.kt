@@ -1,20 +1,19 @@
 package com.example.claudecounter.ui.brand
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -25,12 +24,14 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import com.example.claudecounter.ui.theme.StickColors
-import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * "Clawd" — the pixel-art mascot from the stick firmware, ported as a Compose
@@ -43,11 +44,25 @@ import kotlin.math.sin
  * gen_mockups.py's `im.crop(im.getbbox())` does — otherwise the rendered mascot
  * would carry dead transparent padding above/below and throw off layout math that
  * assumes a ~0.625 aspect ratio (e.g. the 42x26 header icon).
+ *
+ * The animation itself is driven by [MascotBehaviorState] (see MascotBehavior.kt)
+ * — a continuous, procedural engine ported from `clawd-v3-preview.html` — instead
+ * of the fixed-period loops this file used to own directly.
  */
 private const val ViewBoxSize = 24f
-private const val ArtworkTop = 5f
-private const val ArtworkHeight = 15f // 20 - 5
-const val MascotAspectRatio = ArtworkHeight / ViewBoxSize // 0.625
+
+/**
+ * The artwork band grew from [5,20] to [3.5,22.5] to make room for the shadow
+ * and the small jump hop — neither existed when this only had to crop tight
+ * to the silhouette. Width is untouched (no extended anatomy in this pass),
+ * so [MascotAspectRatio] moves from 0.625 to ~0.79: about 27% taller for the
+ * same width. That's a real layout change, most visible at the 42dp header
+ * size — check it visually after this lands, it's the size flagged as most
+ * likely to turn extra detail into noise.
+ */
+private const val ArtworkTop = 3.5f
+private const val ArtworkHeight = 19f // 22.5 - 3.5
+const val MascotAspectRatio = ArtworkHeight / ViewBoxSize
 
 private val OuterContour = listOf(
     20.998f to 10.949f, 24f to 10.949f, 24f to 14.051f, 21f to 14.051f, 21f to 17.079f,
@@ -61,6 +76,9 @@ private val OuterContour = listOf(
 // left, top, right, bottom — in the same viewBox units as OuterContour.
 private val EyeLeft = floatArrayOf(6f, 8.102f, 7.488f, 10.949f)
 private val EyeRight = floatArrayOf(16.51f, 8.102f, 18f, 10.949f)
+
+/** Foot line in viewBox units — pivot for tilt, and where [MascotBehaviorState]'s postureY/jumpHeight land. */
+private const val FootY = 20f
 
 /**
  * Connection state: whether we could reach the endpoint at all. Deliberately
@@ -113,112 +131,22 @@ fun stageFor(pct: Float): MascotStage = when {
     else -> MascotStage.RESTED
 }
 
-private enum class EyeStyle { NORMAL, NARROW, HEAVY_LID, WOBBLE, WIDE, SLEEPY, DEAD_X }
-
 /**
- * Everything the canvas needs for one frame, resolved from mood + stage + the
- * running animation phases. Kept as a plain value (no Compose types beyond
- * [Color]) so the "what does Clawd look like right now" decision is one pure
- * function instead of a `when (mood)` repeated in every draw call.
+ * Representative vitality (0..100) for a stage, used only when a caller doesn't
+ * have the exact usage percentage handy (e.g. [StickHeader]'s login/no-data
+ * fallback). These are the midpoint of each [stageFor] band — 88/62/40/20/5 for
+ * RESTED..CRITICAL — the same presets validated in the `clawd-v3-preview.html`
+ * lab. Callers that do have the real percentage should pass [Mascot]'s `pct`
+ * instead, so vitality is continuous rather than snapping to a band midpoint.
  */
-private data class MascotVisuals(
-    val bodyColor: Color,
-    val bodyAlpha: Float,
-    val bobPx: Float,
-    val shakePx: Float,
-    val slumpPx: Float,
-    val breathScale: Float,
-    val eyeStyle: EyeStyle,
-    val blinking: Boolean,
-    val sweatDrops: Int,
-)
-
-/** Bob amplitude (px) / period (ms), shake amplitude, sweat drops, breath depth. */
-private data class StageMotion(
-    val bobPx: Float,
-    val bobPeriodMs: Int,
-    val shakePx: Float,
-    val sweatDrops: Int,
-    val breathDepth: Float,
-    val blinkPeriodMs: Int,
-)
-
-private fun motionFor(stage: MascotStage): StageMotion = when (stage) {
-    MascotStage.RESTED -> StageMotion(1.5f, 2400, 0f, 0, 0f, 3000)
-    MascotStage.WORKING -> StageMotion(2f, 1400, 0f, 0, 0f, 2200)
-    MascotStage.STRAINING -> StageMotion(2.5f, 900, 0f, 1, 0f, 1800)
-    MascotStage.EXHAUSTED -> StageMotion(3f, 600, 0.8f, 2, 0.012f, 1500)
-    MascotStage.CRITICAL -> StageMotion(4f, 420, 2f, 3, 0.022f, 1200)
-    MascotStage.KO -> StageMotion(0f, 2400, 0f, 0, 0f, 3000)
-    MascotStage.REVIVING -> StageMotion(2f, 700, 0f, 0, 0f, 900)
-}
-
-/**
- * Body tint per stage. We do NOT recolor Clawd wholesale into the green/amber/red
- * usage gradient — the coral [StickColors.Accent] is the brand, and a green Clawd
- * reads as a different character. Mixing a *little* of the band color in reads as
- * "flushed from the effort" while staying recognisably him. The one full recolor
- * is death, which is supposed to be jarring.
- */
-private fun bodyColorFor(stage: MascotStage): Color = when (stage) {
-    MascotStage.RESTED, MascotStage.WORKING, MascotStage.REVIVING -> StickColors.Accent
-    MascotStage.STRAINING -> lerp(StickColors.Accent, StickColors.Warn, 0.15f)
-    MascotStage.EXHAUSTED -> lerp(StickColors.Accent, StickColors.Warn, 0.25f)
-    MascotStage.CRITICAL -> lerp(StickColors.Accent, StickColors.Bad, 0.35f)
-    MascotStage.KO -> StickColors.MascotKo
-}
-
-private fun eyeStyleFor(stage: MascotStage): EyeStyle = when (stage) {
-    MascotStage.RESTED, MascotStage.WORKING -> EyeStyle.NORMAL
-    MascotStage.STRAINING -> EyeStyle.NARROW
-    MascotStage.EXHAUSTED -> EyeStyle.HEAVY_LID
-    MascotStage.CRITICAL -> EyeStyle.WOBBLE
-    MascotStage.KO -> EyeStyle.DEAD_X
-    MascotStage.REVIVING -> EyeStyle.WIDE
-}
-
-private fun mascotVisuals(
-    mood: MascotMood,
-    stage: MascotStage,
-    bobPhase: Float,
-    blinkPhase: Float,
-    shakePhase: Float,
-): MascotVisuals {
-    // A mood other than Ok/Limited means the usage number behind [stage] is stale
-    // or missing, so connection state wins — showing a cheerfully bobbing Clawd
-    // next to a dead endpoint would be a lie.
-    if (mood == MascotMood.Error) {
-        return MascotVisuals(
-            bodyColor = StickColors.MascotKo, bodyAlpha = 1f, bobPx = 0f, shakePx = 0f,
-            slumpPx = 6f, breathScale = 1f, eyeStyle = EyeStyle.DEAD_X, blinking = false, sweatDrops = 0
-        )
-    }
-    if (mood == MascotMood.Unavailable || mood == MascotMood.NeverProbed) {
-        return MascotVisuals(
-            bodyColor = StickColors.Accent,
-            bodyAlpha = if (mood == MascotMood.NeverProbed) 140f / 255f else 1f,
-            bobPx = 0f, shakePx = 0f, slumpPx = 0f, breathScale = 1f,
-            eyeStyle = EyeStyle.SLEEPY, blinking = false, sweatDrops = 0
-        )
-    }
-
-    val motion = motionFor(stage)
-    // A 429 means the *server* is throttling us on top of whatever the quota says,
-    // so he sweats at least one drop even while the stage is otherwise relaxed.
-    val sweat = if (mood == MascotMood.Limited) maxOf(motion.sweatDrops, 1) else motion.sweatDrops
-
-    return MascotVisuals(
-        bodyColor = bodyColorFor(stage),
-        bodyAlpha = 1f,
-        bobPx = motion.bobPx * sin(bobPhase),
-        shakePx = motion.shakePx * sin(shakePhase),
-        slumpPx = if (stage == MascotStage.KO) 6f else 0f,
-        breathScale = 1f + motion.breathDepth * sin(bobPhase * 2f),
-        eyeStyle = eyeStyleFor(stage),
-        // Blink for the last ~150ms of each cycle. The dead don't blink.
-        blinking = stage != MascotStage.KO && blinkPhase >= 1f - (150f / motion.blinkPeriodMs),
-        sweatDrops = sweat,
-    )
+private fun stageMidpointVitality(stage: MascotStage): Float = when (stage) {
+    MascotStage.RESTED -> 88f
+    MascotStage.WORKING -> 62f
+    MascotStage.STRAINING -> 40f
+    MascotStage.EXHAUSTED -> 20f
+    MascotStage.CRITICAL -> 5f
+    MascotStage.KO -> 0f
+    MascotStage.REVIVING -> 95f
 }
 
 /**
@@ -226,49 +154,58 @@ private fun mascotVisuals(
  * [modifier] is applied to the outer Box so callers (e.g. the momento overlay)
  * can layer their own entrance/shake transforms without touching the mood/stage
  * animation defined here.
+ *
+ * [pct] is the exact usage percentage (0..100) when the caller has it — it
+ * drives [MascotBehaviorState] continuously instead of snapping between
+ * [stageMidpointVitality] bands. Optional and additive: existing call sites
+ * that only pass [stage] keep compiling and working unchanged.
+ *
+ * [behaviorState] lets a caller hoist and hold on to the engine instance
+ * instead of Mascot owning one internally — the mascot gallery needs this to
+ * call `forceAction`/`forceBlink` on the exact instance being drawn. null
+ * (every existing call site) keeps the old self-contained behavior.
  */
 @Composable
 fun Mascot(
     width: Dp,
     mood: MascotMood = MascotMood.Ok,
     stage: MascotStage = MascotStage.RESTED,
+    pct: Float? = null,
+    behaviorState: MascotBehaviorState? = null,
     modifier: Modifier = Modifier,
 ) {
-    val motion = motionFor(stage)
-    val infinite = rememberInfiniteTransition(label = "mascot")
+    val behavior = behaviorState ?: remember { MascotBehaviorState() }
 
-    // Idle bob: firmware uses `2*sin(phase + i*0.9) - 1` px. The period shortens as
-    // he strains, which is what sells "working harder" more than amplitude does.
-    val bobPhase by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * Math.PI).toFloat(),
-        animationSpec = infiniteRepeatable(tween(motion.bobPeriodMs, easing = LinearEasing)),
-        label = "bob"
-    )
+    // Error/Unavailable/NeverProbed mean there's no trustworthy usage number at
+    // all, so they short-circuit to a static look instead of driving the
+    // procedural engine — same precedence rule the old mascotVisuals() had.
+    val isStatic = mood == MascotMood.Error || mood == MascotMood.Unavailable || mood == MascotMood.NeverProbed
+    val rawVitalityTarget = pct?.let { (100f - it).coerceIn(0f, 100f) } ?: stageMidpointVitality(stage)
+    // Limited (429): the server is throttling on top of whatever the quota says,
+    // so nudge vitality down enough that the sweat-rate trait kicks in — same
+    // intent as the old maxOf(sweatDrops, 1).
+    val vitalityTarget = if (mood == MascotMood.Limited) rawVitalityTarget.coerceAtMost(45f) else rawVitalityTarget
 
-    // Normalized 0..1 blink cycle so the eyelid timing is period-independent.
-    val blinkPhase by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(motion.blinkPeriodMs, easing = LinearEasing)),
-        label = "blink"
-    )
+    // LaunchedEffect(Unit) never restarts, so the long-running frame loop reads
+    // the target through rememberUpdatedState instead of closing over a stale
+    // value from whichever recomposition first launched it.
+    val currentVitalityTarget = rememberUpdatedState(vitalityTarget)
+    val currentIsStatic = rememberUpdatedState(isStatic)
 
-    // Fast phase driving the tremor at EXHAUSTED/CRITICAL.
-    val shakePhase by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * Math.PI).toFloat(),
-        animationSpec = infiniteRepeatable(tween(140, easing = LinearEasing)),
-        label = "shake"
-    )
-
-    // Sweat drop cycle: falls and fades over 900ms, then loops.
-    val tearPhase by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
-        label = "tear"
-    )
+    var frameMillis by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        var last = withFrameMillis { it }
+        while (true) {
+            val now = withFrameMillis { it }
+            val dt = ((now - last) / 1000f).coerceIn(0f, 0.1f)
+            last = now
+            if (!currentIsStatic.value) {
+                behavior.setVitalityTarget(currentVitalityTarget.value)
+                behavior.step(dt)
+            }
+            frameMillis = now
+        }
+    }
 
     // One-shot bouncy pop when he comes back to life — the payoff for the reset.
     val popScale = remember { Animatable(1f) }
@@ -281,44 +218,86 @@ fun Mascot(
         }
     }
 
-    val visuals = mascotVisuals(mood, stage, bobPhase, blinkPhase, shakePhase)
     val heightDp = width * MascotAspectRatio
 
     Box(modifier.size(width, heightDp)) {
         Canvas(Modifier.size(width, heightDp)) {
+            frameMillis // subscribe this draw to the per-frame tick
             val scaleFactor = size.width / ViewBoxSize
             fun vx(v: Float) = v * scaleFactor
             fun vy(v: Float) = (v - ArtworkTop) * scaleFactor
 
-            scale(popScale.value * visuals.breathScale) {
-                translate(left = visuals.shakePx, top = visuals.bobPx + visuals.slumpPx) {
-                    val path = Path().apply {
-                        fillType = PathFillType.EvenOdd
-                        moveTo(vx(OuterContour[0].first), vy(OuterContour[0].second))
-                        for (i in 1 until OuterContour.size) {
-                            lineTo(vx(OuterContour[i].first), vy(OuterContour[i].second))
-                        }
-                        close()
-                        addRect(Rect(vx(EyeLeft[0]), vy(EyeLeft[1]), vx(EyeLeft[2]), vy(EyeLeft[3])))
-                        addRect(Rect(vx(EyeRight[0]), vy(EyeRight[1]), vx(EyeRight[2]), vy(EyeRight[3])))
-                    }
-                    drawPath(path, color = visuals.bodyColor, alpha = visuals.bodyAlpha)
-
-                    drawEye(EyeLeft, ::vx, ::vy, visuals, shakePhase)
-                    drawEye(EyeRight, ::vx, ::vy, visuals, shakePhase)
-                    drawSweat(EyeRight, ::vx, ::vy, visuals.sweatDrops, tearPhase)
-                }
+            if (isStatic) {
+                drawStaticMood(mood, ::vx, ::vy, scaleFactor)
+            } else {
+                drawBehaviorFrame(behavior.frame, behavior.particlesSnapshot(), popScale.value, ::vx, ::vy, scaleFactor)
             }
         }
     }
 }
 
-private fun DrawScope.drawEye(
+private fun DrawScope.drawBehaviorFrame(
+    frame: MascotFrame,
+    particles: List<MascotParticle>,
+    popScale: Float,
+    vx: (Float) -> Float,
+    vy: (Float) -> Float,
+    scaleFactor: Float,
+) {
+    // Drawn first (behind everything) and deliberately NOT nested inside the
+    // root translate below — a shadow tracks the ground, not the body's own
+    // droop/jump offset. Only its size/alpha react to how airborne he is.
+    drawShadow(frame, vx, vy, scaleFactor)
+
+    // Root layer: posture droop + tremor (translate) + lean (rotate), pivoted
+    // at the feet. Squash & stretch is a second, inner layer scoped to just
+    // the body — see the nested scale() below — never the whole canvas, which
+    // is the "never move the whole SVG" rule the V3 proposal called out.
+    translate(left = frame.tremorX * scaleFactor, top = frame.postureY * scaleFactor) {
+        rotate(degrees = frame.tiltDeg, pivot = Offset(vx(12f), vy(FootY))) {
+            val footPivot = Offset(vx(12f), vy(FootY))
+            val squashScaleY = frame.squashY * popScale
+            val squashScaleX = (1f / sqrt(frame.squashY)) * popScale // preserves volume
+            scale(scaleX = squashScaleX, scaleY = squashScaleY, pivot = footPivot) {
+                val path = Path().apply {
+                    fillType = PathFillType.EvenOdd
+                    moveTo(vx(OuterContour[0].first), vy(OuterContour[0].second))
+                    for (i in 1 until OuterContour.size) {
+                        lineTo(vx(OuterContour[i].first), vy(OuterContour[i].second))
+                    }
+                    close()
+                    addRect(Rect(vx(EyeLeft[0]), vy(EyeLeft[1]), vx(EyeLeft[2]), vy(EyeLeft[3])))
+                    addRect(Rect(vx(EyeRight[0]), vy(EyeRight[1]), vx(EyeRight[2]), vy(EyeRight[3])))
+                }
+                drawPath(path, color = frame.tint)
+                drawFlatFaceShading(path, frame.tint, vx, vy)
+
+                drawContinuousEye(EyeLeft, vx, vy, frame)
+                drawContinuousEye(EyeRight, vx, vy, frame)
+            }
+        }
+    }
+
+    for (particle in particles) {
+        val lifeFrac = (particle.life / particle.maxLife).coerceIn(0f, 1f)
+        val color = if (particle.kind == ParticleKind.SWEAT) StickColors.Blue else StickColors.Warn
+        val alpha = if (particle.kind == ParticleKind.SWEAT) (1f - lifeFrac) else kotlin.math.sin(Math.PI.toFloat() * lifeFrac)
+        val s = particle.size * scaleFactor
+        drawRoundRect(
+            color = color.copy(alpha = alpha.coerceIn(0f, 1f) * 0.9f),
+            topLeft = Offset(vx(particle.x), vy(particle.y)),
+            size = Size(s, s),
+            cornerRadius = CornerRadius(s * 0.3f),
+        )
+    }
+}
+
+/** Pupil position/size and eyelid coverage read continuously off [MascotFrame] instead of a discrete [EyeStyle]-style switch. */
+private fun DrawScope.drawContinuousEye(
     socket: FloatArray,
     vx: (Float) -> Float,
     vy: (Float) -> Float,
-    visuals: MascotVisuals,
-    shakePhase: Float,
+    frame: MascotFrame,
 ) {
     val left = vx(socket[0])
     val top = vy(socket[1])
@@ -326,90 +305,164 @@ private fun DrawScope.drawEye(
     val bottom = vy(socket[3])
     val w = right - left
     val h = bottom - top
+    val cx = (left + right) / 2f
+    val cy = (top + bottom) / 2f
 
-    /** Pupil sized as a fraction of the socket, optionally nudged sideways. */
-    fun pupil(widthFrac: Float, heightFrac: Float, dx: Float = 0f, alpha: Float = 0.8f) {
+    val pupilW = w * 0.64f * frame.pupilScale
+    val pupilH = h * 0.76f * frame.pupilScale
+    drawRoundRect(
+        color = Color.Black.copy(alpha = 0.8f),
+        topLeft = Offset(cx - pupilW / 2f + frame.lookX * w, cy - pupilH / 2f + frame.lookY * h),
+        size = Size(pupilW, pupilH),
+        cornerRadius = CornerRadius(pupilW * 0.18f),
+    )
+    if (frame.eyelidFrac > 0.001f) {
         drawRoundRect(
-            color = Color.Black.copy(alpha = alpha * visuals.bodyAlpha),
-            topLeft = Offset(left + w * (1f - widthFrac) / 2f + dx, top + h * (1f - heightFrac) / 2f),
-            size = Size(w * widthFrac, h * heightFrac),
-            cornerRadius = CornerRadius(w * 0.18f)
-        )
-    }
-
-    /** Coral eyelid dropping [frac] of the way down the socket. */
-    fun lid(frac: Float) {
-        drawRoundRect(
-            color = visuals.bodyColor.copy(alpha = visuals.bodyAlpha),
+            color = frame.tint,
             topLeft = Offset(left, top),
-            size = Size(w, h * frac),
-            cornerRadius = CornerRadius(w * 0.15f)
+            size = Size(w, h * frame.eyelidFrac),
+            cornerRadius = CornerRadius(w * 0.18f),
         )
-    }
-
-    when (visuals.eyeStyle) {
-        EyeStyle.DEAD_X -> {
-            val strokeWidth = (w * 0.28f).coerceAtLeast(1f)
-            drawLine(StickColors.Bad, Offset(left, top), Offset(right, bottom), strokeWidth, StrokeCap.Round)
-            drawLine(StickColors.Bad, Offset(right, top), Offset(left, bottom), strokeWidth, StrokeCap.Round)
-        }
-        EyeStyle.SLEEPY -> {
-            pupil(0.7f, 0.5f, alpha = 0.75f)
-            lid(0.4f)
-        }
-        EyeStyle.NORMAL -> {
-            pupil(0.64f, 0.76f)
-            if (visuals.blinking) lid(1f)
-        }
-        EyeStyle.NARROW -> {
-            // Squinting with effort — smaller pupil, slight lid.
-            pupil(0.5f, 0.5f)
-            lid(0.22f)
-            if (visuals.blinking) lid(1f)
-        }
-        EyeStyle.HEAVY_LID -> {
-            pupil(0.55f, 0.45f)
-            lid(0.5f)
-            if (visuals.blinking) lid(1f)
-        }
-        EyeStyle.WOBBLE -> {
-            // Eyes darting: the pupil skitters inside the socket.
-            pupil(0.42f, 0.42f, dx = w * 0.16f * sin(shakePhase))
-            lid(0.3f)
-        }
-        EyeStyle.WIDE -> {
-            pupil(0.8f, 0.9f, alpha = 0.85f)
-        }
     }
 }
 
 /**
- * Falling, fading sweat drops beside the right eye. Drops are phase-staggered so
- * they trail each other instead of falling as one blob.
+ * Shadow ellipse, pinned to the ground line (not the body's own droop/jump
+ * offset). Shrinks and fades as [MascotFrame.jumpHeight] approaches
+ * [MascotJumpAmplitude] — "sombra encolhe quando pula, alarga quando pousa".
  */
-private fun DrawScope.drawSweat(
+private fun DrawScope.drawShadow(
+    frame: MascotFrame,
+    vx: (Float) -> Float,
+    vy: (Float) -> Float,
+    scaleFactor: Float,
+) {
+    val air = (frame.jumpHeight / MascotJumpAmplitude).coerceIn(0f, 1f)
+    val rx = 8.4f * (1f - 0.42f * air) * scaleFactor
+    val ry = 1.0f * (1f - 0.35f * air) * scaleFactor
+    val cx = vx(12f + frame.tremorX * 0.6f)
+    val cy = vy(FootY + 1.3f)
+    drawOval(
+        color = Color.Black.copy(alpha = 0.32f * (1f - 0.5f * air)),
+        topLeft = Offset(cx - rx, cy - ry),
+        size = Size(rx * 2f, ry * 2f),
+    )
+}
+
+/** Fixed-size shadow for the static-mood branch — no jump/air to react to there. */
+private fun DrawScope.drawStaticShadow(
+    vx: (Float) -> Float,
+    vy: (Float) -> Float,
+    scaleFactor: Float,
+) {
+    val rx = 8.4f * scaleFactor
+    val ry = 1.0f * scaleFactor
+    drawOval(
+        color = Color.Black.copy(alpha = 0.28f),
+        topLeft = Offset(vx(12f) - rx, vy(FootY + 1.3f) - ry),
+        size = Size(rx * 2f, ry * 2f),
+    )
+}
+
+/**
+ * Flat, solid-tone shading — a thin lighter strip along the top edge and a
+ * thin darker strip along one side, both plain colors with no gradient/blend
+ * in between. Reads as "this has volume" the way a Minecraft/low-poly block
+ * does, without a specular highlight that would wash out the brand coral —
+ * the front face (almost the whole silhouette) stays exactly [tint], untouched.
+ */
+private fun DrawScope.drawFlatFaceShading(
+    bodyPath: Path,
+    tint: Color,
+    vx: (Float) -> Float,
+    vy: (Float) -> Float,
+) {
+    val topTint = lerp(tint, Color.White, 0.16f)
+    val sideTint = lerp(tint, Color.Black, 0.14f)
+    clipPath(bodyPath) {
+        drawRect(
+            color = topTint,
+            topLeft = Offset(vx(0f), vy(5f)),
+            size = Size(vx(24f) - vx(0f), vy(6.2f) - vy(5f)),
+        )
+        drawRect(
+            color = sideTint,
+            topLeft = Offset(vx(19f), vy(5f)),
+            size = Size(vx(24f) - vx(19f), vy(17.079f) - vy(5f)),
+        )
+    }
+}
+
+/** Error/Unavailable/NeverProbed — no trustworthy usage number, so this bypasses [MascotBehaviorState] entirely. */
+private fun DrawScope.drawStaticMood(
+    mood: MascotMood,
+    vx: (Float) -> Float,
+    vy: (Float) -> Float,
+    scaleFactor: Float,
+) {
+    drawStaticShadow(vx, vy, scaleFactor)
+
+    val bodyColor = if (mood == MascotMood.Error) StickColors.MascotKo else StickColors.Accent
+    val bodyAlpha = if (mood == MascotMood.NeverProbed) 140f / 255f else 1f
+    val slumpViewBoxUnits = if (mood == MascotMood.Error) 1.5f else 0f
+
+    translate(top = slumpViewBoxUnits * scaleFactor) {
+        val path = Path().apply {
+            fillType = PathFillType.EvenOdd
+            moveTo(vx(OuterContour[0].first), vy(OuterContour[0].second))
+            for (i in 1 until OuterContour.size) {
+                lineTo(vx(OuterContour[i].first), vy(OuterContour[i].second))
+            }
+            close()
+            addRect(Rect(vx(EyeLeft[0]), vy(EyeLeft[1]), vx(EyeLeft[2]), vy(EyeLeft[3])))
+            addRect(Rect(vx(EyeRight[0]), vy(EyeRight[1]), vx(EyeRight[2]), vy(EyeRight[3])))
+        }
+        drawPath(path, color = bodyColor, alpha = bodyAlpha)
+        drawFlatFaceShading(path, bodyColor.copy(alpha = bodyAlpha), vx, vy)
+
+        if (mood == MascotMood.Error) {
+            drawDeadEye(EyeLeft, vx, vy)
+            drawDeadEye(EyeRight, vx, vy)
+        } else {
+            drawSleepyEye(EyeLeft, vx, vy, bodyColor, bodyAlpha)
+            drawSleepyEye(EyeRight, vx, vy, bodyColor, bodyAlpha)
+        }
+    }
+}
+
+private fun DrawScope.drawDeadEye(socket: FloatArray, vx: (Float) -> Float, vy: (Float) -> Float) {
+    val left = vx(socket[0])
+    val top = vy(socket[1])
+    val right = vx(socket[2])
+    val bottom = vy(socket[3])
+    val strokeWidth = ((right - left) * 0.28f).coerceAtLeast(1f)
+    drawLine(StickColors.Bad, Offset(left, top), Offset(right, bottom), strokeWidth, StrokeCap.Round)
+    drawLine(StickColors.Bad, Offset(right, top), Offset(left, bottom), strokeWidth, StrokeCap.Round)
+}
+
+private fun DrawScope.drawSleepyEye(
     socket: FloatArray,
     vx: (Float) -> Float,
     vy: (Float) -> Float,
-    count: Int,
-    tearPhase: Float,
+    tint: Color,
+    alpha: Float,
 ) {
-    if (count <= 0) return
     val left = vx(socket[0])
     val top = vy(socket[1])
     val right = vx(socket[2])
     val bottom = vy(socket[3])
     val w = right - left
     val h = bottom - top
-    val cy = top + h / 2f
-
-    for (i in 0 until count) {
-        val t = (tearPhase + i * 0.33f) % 1f
-        drawRoundRect(
-            color = StickColors.Blue.copy(alpha = (1f - t).coerceIn(0f, 1f)),
-            topLeft = Offset(right + w * 0.15f, cy + t * h * 1.4f),
-            size = Size(w * 0.5f, h * 0.55f),
-            cornerRadius = CornerRadius(w * 0.2f)
-        )
-    }
+    drawRoundRect(
+        color = Color.Black.copy(alpha = 0.75f * alpha),
+        topLeft = Offset(left + w * 0.15f, top + h * 0.25f),
+        size = Size(w * 0.7f, h * 0.5f),
+        cornerRadius = CornerRadius(w * 0.18f),
+    )
+    drawRoundRect(
+        color = tint.copy(alpha = alpha),
+        topLeft = Offset(left, top),
+        size = Size(w, h * 0.4f),
+        cornerRadius = CornerRadius(w * 0.15f),
+    )
 }

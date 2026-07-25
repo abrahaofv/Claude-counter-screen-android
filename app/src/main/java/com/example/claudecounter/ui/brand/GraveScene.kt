@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.Dp
@@ -49,6 +50,19 @@ fun GraveScene(width: Dp, modifier: Modifier = Modifier) {
         animationSpec = infiniteRepeatable(tween(3200, easing = LinearEasing)),
         label = "ghost-float"
     )
+    // Spirit particles — the one addition the V3 proposal asked for on top of
+    // the tombstone+ghost that already shipped in fase 7. Five embers rising
+    // past the stone, staggered by a fixed phase offset each so they never
+    // rise in sync — same "no two instances in lockstep" spirit as the
+    // Mascot V3 particle pool, just deterministic (phase-driven, not a
+    // random spawn pool) since this is one ambient scene, not five live
+    // instances competing for attention.
+    val spiritCycle by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(5200, easing = LinearEasing)),
+        label = "spirit-cycle"
+    )
 
     val heightDp = width * GraveSceneAspectRatio
 
@@ -62,6 +76,8 @@ fun GraveScene(width: Dp, modifier: Modifier = Modifier) {
                 topLeft = Offset(s(5f), s(28.5f)),
                 size = Size(s(30f), s(6f))
             )
+
+            drawSpirits(spiritCycle, ::s)
 
             // 0%/100% of the CSS keyframe sit at floatPhase 0 and 2pi, the single
             // peak (translateY -14%, opacity 1) sits at the midpoint — sin(phase/2)
@@ -131,5 +147,25 @@ fun GraveScene(width: Dp, modifier: Modifier = Modifier) {
                 }
             )
         }
+    }
+}
+
+private val SpiritBaseX = floatArrayOf(13f, 17f, 20f, 23f, 27f)
+
+/** Five embers rising from around the stone and fading out past the ghost's
+ * head — each on its own phase offset (i/count) so they drift by staggered,
+ * never all at the same height at once. */
+private fun DrawScope.drawSpirits(cycle: Float, s: (Float) -> Float) {
+    for (i in SpiritBaseX.indices) {
+        val local = (cycle + i.toFloat() / SpiritBaseX.size) % 1f
+        val y = 26f - local * 21f
+        val drift = sin(local * 4f * Math.PI.toFloat() + i) * 1.6f
+        val alpha = sin(Math.PI.toFloat() * local).coerceIn(0f, 1f) * 0.55f
+        val radius = 0.9f + 0.5f * sin(local * Math.PI.toFloat())
+        drawCircle(
+            color = StickColors.Lilac.copy(alpha = alpha),
+            radius = s(radius),
+            center = Offset(s(SpiritBaseX[i] + drift), s(y)),
+        )
     }
 }

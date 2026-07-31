@@ -174,6 +174,11 @@ fun Mascot(
     behaviorState: MascotBehaviorState? = null,
     modifier: Modifier = Modifier,
 ) {
+    if (stage == MascotStage.KO && mood == MascotMood.Ok) {
+        GraveScene(width = width, modifier = modifier)
+        return
+    }
+
     val behavior = behaviorState ?: remember { MascotBehaviorState() }
 
     // Error/Unavailable/NeverProbed mean there's no trustworthy usage number at

@@ -1,6 +1,6 @@
 # Reduzir consumo de memória do Claude Counter Desktop (~30%, baixo risco)
 
-> **Criado:** 2026-07-24 20:43:42 · **Atualizado:** 2026-07-24 20:43:42
+> **Criado:** 2026-07-24 20:43:42 · **Atualizado:** 2026-07-29 10:16:40
 
 ## Context
 
@@ -29,23 +29,24 @@ muda o comportamento de rede/anti-bot documentado como intencional, então fica 
 
 ### Fase 1 — Cortes de memória de baixo risco (GPU, áudio, overlay lazy)
 
-- [ ] 1.1 `src/main/main.ts`: adicionar `app.disableHardwareAcceleration()` no topo do
+- [x] 1.1 `src/main/main.ts`: adicionado `app.disableHardwareAcceleration()` no topo do
   arquivo, antes de `app.whenReady().then(...)` — remove o processo de GPU dedicado por
   inteiro (~50-64MB). As janelas do app são pequenas e usam só Canvas 2D (nunca WebGL/CSS 3D
   pesado), então a compositação por software não deve custar CPU perceptível.
-- [ ] 1.2 `src/main/main.ts`: adicionar `app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess')`
+- [x] 1.2 `src/main/main.ts`: adicionado `app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess')`
   antes de `app.whenReady()` — o app não usa nenhuma API de áudio em lugar nenhum, então esse
   processo (~27MB) é puro overhead do Chromium; a chamada dobra essa responsabilidade de
   volta pro processo principal sem custo real.
-- [ ] 1.3 `src/main/overlayWindow.ts`: mover a criação da `BrowserWindow` (hoje no
-  construtor de `OverlayWindow`) para dentro de um método privado `ensureWindow()`, chamado
-  no início de `show()`. `dismiss()` e `reposition()` passam a checar se a janela existe
-  antes de operar nela (ela pode nunca ter sido criada). `getAnchorBounds` continua injetado
-  no construtor sem mudança. Overlay só aparece em eventos raros (cruzar 25/50/70/100% ou
-  reviver) — manter esse processo inteiro fora da memória na maioria das sessões, ao custo
-  de uma carga de página quase instantânea (`overlay.html` é estático e pequeno) só na
-  primeira vez que um limiar é cruzado.
-- [ ] 1.4 Build (`npm run build`) e smoke test (`npm start`) — ver seção Verificação abaixo.
+- [x] 1.3 `src/main/overlayWindow.ts`: criação da `BrowserWindow` movida do construtor para
+  um método privado `ensureWindow()`, chamado no início de `show()`. Adicionado também um
+  flag `pageReady` (setado via `did-finish-load`) para não perder o primeiro
+  `webContents.send('usage:moment', ...)` numa corrida contra o carregamento de
+  `overlay.html` — mesmo padrão já usado em `panelWindow.ts`. `dismiss()`/`reposition()`
+  passam a checar se a janela existe antes de operar nela. Overlay só aparece em eventos
+  raros (cruzar 25/50/70/100% ou reviver) — mantém esse processo inteiro fora da memória na
+  maioria das sessões.
+- [x] 1.4 Build (`npm run build`) e packaging (`npm run dist`) — ver Registro de execução
+  sobre a limitação de smoke test interativo neste ambiente.
 
 ## Verificação
 
@@ -69,3 +70,25 @@ muda o comportamento de rede/anti-bot documentado como intencional, então fica 
 - **Sem mudança de contrato de comportamento** (threshold/cadência/parse continuam iguais) —
   `SPEC.md` não precisa de entrada de changelog, é só otimização de processo, invisível ao
   usuário/ao Android.
+
+## Registro de execução
+
+- 2026-07-29 10:16 — Fases 1.1–1.4 implementadas. `npm run build` limpo e `npm run dist`
+  reempacotou `release/Claude Counter Desktop 0.1.0.exe` sem erros.
+- **Smoke test interativo (`npm start`) não é possível neste ambiente**: o sandbox desta
+  sessão define `ELECTRON_RUN_AS_NODE=1`, o que faz `require('electron')` retornar só a
+  string do caminho do binário em vez da API real — `app` fica `undefined` e
+  `app.disableHardwareAcceleration()` lança `TypeError` de imediato. Isso **não é um bug do
+  código**: é só a Electron rodando como Node puro por causa dessa variável de ambiente do
+  sandbox; o `.exe` empacotado (que o usuário abre por fora deste ambiente) não tem essa
+  variável setada e deve inicializar normalmente. Não há como validar interativamente
+  (ocultar/mostrar, contagem de processos, redução de MB) de dentro desta sessão — precisa do
+  usuário testando o `.exe` de verdade, igual às levas anteriores.
+
+## Status Final
+
+Os 3 cortes de baixo risco (GPU dedicada, serviço de áudio, overlay lazy) estão implementados
+e compilando/empacotando sem erro. A validação funcional (mostrar/ocultar, contagem de
+processos via `Get-CimInstance`, soma de `WorkingSet64` antes/depois) fica pendente do
+usuário testando `release/Claude Counter Desktop 0.1.0.exe` — não pôde ser feita nesta sessão
+por causa do `ELECTRON_RUN_AS_NODE=1` do sandbox.

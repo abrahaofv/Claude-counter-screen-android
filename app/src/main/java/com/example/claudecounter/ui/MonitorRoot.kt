@@ -180,6 +180,7 @@ fun MonitorRoot(
                 onAdaptiveChange = pollingSettings::setAdaptiveEnabled,
                 onIdleIntervalChange = pollingSettings::setIdleIntervalMs,
                 onActiveIntervalChange = pollingSettings::setActiveIntervalMs,
+                onRetry = onRefresh,
                 onLogout = {
                     showSettings = false
                     onLogout()

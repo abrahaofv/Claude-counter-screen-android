@@ -280,6 +280,14 @@ class SessionManager private constructor(context: Context) {
         const val ACTIVE_LINGER_MS = 3L * 60_000L
 
         /**
+         * Cadence [UsagePollingService] retries the fetch while [UsageState.isApiBlocked]
+         * is true. Infrequent enough to stay battery-conscious, but bounded — a stuck
+         * 403 (which may just be a stale session cookie, not a permanent Anthropic
+         * block) is retried instead of freezing the poll loop forever.
+         */
+        const val BLOCKED_RETRY_INTERVAL_MS = 45L * 60_000L
+
+        /**
          * The session cookie is a full-account credential, so it is stored in
          * [EncryptedSharedPreferences] (AES-256-GCM, key held in the Android Keystore)
          * rather than a plaintext prefs file.

@@ -51,6 +51,7 @@ fun SettingsScreen(
     onAdaptiveChange: (Boolean) -> Unit,
     onIdleIntervalChange: (Long) -> Unit,
     onActiveIntervalChange: (Long) -> Unit,
+    onRetry: () -> Unit,
     onLogout: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
@@ -101,7 +102,7 @@ fun SettingsScreen(
 
         if (isApiBlocked) {
             Row(Modifier.padding(top = 16.dp)) {
-                ApiBlockedBanner()
+                ApiBlockedBanner(onRetry = onRetry)
             }
         }
 
@@ -388,7 +389,7 @@ private fun IntervalChip(
 
 /** "API Access Restricted" — carried over from the original MainActivity banner. */
 @Composable
-private fun ApiBlockedBanner() {
+private fun ApiBlockedBanner(onRetry: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -407,5 +408,8 @@ private fun ApiBlockedBanner() {
             style = StickType.caption,
             modifier = Modifier.padding(top = 8.dp)
         )
+        OutlinedButton(onClick = onRetry, modifier = Modifier.padding(top = 12.dp)) {
+            Text("Tentar novamente", color = StickColors.Accent)
+        }
     }
 }

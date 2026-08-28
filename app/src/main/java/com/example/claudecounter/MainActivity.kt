@@ -91,11 +91,11 @@ class MainActivity : ComponentActivity() {
                 val usageState by viewModel.usageState.collectAsStateWithLifecycle()
 
                 if (usageState.isLoggedIn) {
-                    // Only start polling service if API is not known to be blocked
-                    if (!usageState.isApiBlocked) {
-                        LaunchedEffect(Unit) {
-                            startForegroundService(Intent(this@MainActivity, UsagePollingService::class.java))
-                        }
+                    // Always start the service, even while isApiBlocked: it now
+                    // self-throttles to a long retry cadence instead of hot-polling,
+                    // so withholding it here would only prevent auto-recovery.
+                    LaunchedEffect(Unit) {
+                        startForegroundService(Intent(this@MainActivity, UsagePollingService::class.java))
                     }
                     MonitorRoot(
                         usageState = usageState,

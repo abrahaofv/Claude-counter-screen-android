@@ -17,7 +17,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -61,6 +63,20 @@ class UsagePollingService : Service() {
                 rescheduleNow()
             }
         }
+
+        // A successful manual retry (banner button or header refresh icon) clears
+        // isApiBlocked from outside this loop — pick that up immediately instead of
+        // waiting out the long blocked-retry delay.
+        scope.launch {
+            sessionManager.usageState
+                .map { it.isApiBlocked }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    Log.d(tag, "isApiBlocked changed to $it, rescheduling")
+                    rescheduleNow()
+                }
+        }
         Log.d(tag, "Service started")
     }
 
@@ -80,6 +96,9 @@ class UsagePollingService : Service() {
 
     /** The cadence in force right now, honouring the adaptive on/off switch. */
     private fun currentIntervalMs(): Long {
+        if (sessionManager.usageState.value.isApiBlocked) {
+            return SessionManager.BLOCKED_RETRY_INTERVAL_MS
+        }
         val config = pollingSettings.current
         val active = config.adaptiveEnabled &&
             sessionManager.usageState.value.pollMode == PollMode.ACTIVE
@@ -102,12 +121,10 @@ class UsagePollingService : Service() {
     private fun pollUsage() {
         val orgId = sessionManager.orgId ?: return
 
-        // Don't poll if we already know the API is blocked
-        if (sessionManager.usageState.value.isApiBlocked) {
-            Log.d(tag, "API blocked, skipping poll")
-            return
-        }
-
+        // While blocked, currentIntervalMs() already slows the tick down to
+        // BLOCKED_RETRY_INTERVAL_MS, so every tick here is a deliberate, infrequent
+        // retry — it must actually attempt the fetch, not skip it, or the block
+        // would never self-heal.
         WebViewUsageFetcher.getInstance().fetchUsage(this, orgId) { json, error ->
             val result = ClaudeApiService.parseUsageResponse(json, error)
             if (result.success && result.data != null) {
@@ -136,9 +153,9 @@ class UsagePollingService : Service() {
                 // Refresh persistent notification with latest usage
                 updateForegroundNotification(result.data)
             } else if (result.isApiBlocked) {
-                Log.w(tag, "API blocked (403) — stopping polling")
+                val retryMin = SessionManager.BLOCKED_RETRY_INTERVAL_MS / 60_000
+                Log.w(tag, "API blocked (403) — will retry every ${retryMin}min")
                 sessionManager.setApiBlocked(true, result.errorMessage)
-                handler.removeCallbacks(pollRunnable)
                 updateForegroundNotificationBlocked()
             } else {
                 Log.w(tag, "Usage fetch failed: ${result.errorMessage}")
